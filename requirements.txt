@@ -1,0 +1,8 @@
+Flask>=2.2
+Flask-SQLAlchemy>=3.0
+Flask-SocketIO>=5.3
+eventlet
+scapy>=2.4.5
+python-dotenv
+netifaces>=0.11
+Flask-Migrate>=4.0
