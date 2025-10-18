@@ -1,5 +1,5 @@
 from flask import Flask
-from netwacher.exstension import db
+from netwacher.exstension import db, socketio
 from netwacher.views import api
 from config import Config
 
@@ -9,6 +9,12 @@ def create_app(config_object=Config):
     
     # init exstension
     db.init_app(app)
+    socketio.init_app(app)
     
     # register blueprint (route/view)
     app.register_blueprint(api, url_prefix='/api')
+    
+if __name__ == '__main__':
+    app = create_app()
+    # gunakan socketio.run agar WebSocket aktif
+    socketio.run(app, debug=True, host='127.0.0.1', port=5000)
