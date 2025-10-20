@@ -1,7 +1,7 @@
 from scapy.all import srp, Ether, ARP, conf
 import socket
 
-def _get_local_ip():
+def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("8.8.8.8", 80))
@@ -24,7 +24,7 @@ def scapy_arp_scan(timeout=2, iface=None):
     """
     conf.verb = 0
     try: 
-        local_ip = _get_local_ip()
+        local_ip = get_local_ip()
     except Exception:
         return []
     parts = local_ip.split('.')
