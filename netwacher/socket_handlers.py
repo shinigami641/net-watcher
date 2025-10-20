@@ -13,5 +13,5 @@ class NotificationsNamespace(Namespace):
         emit('server_response', {'ok': True})
 
 # pendaftaran
-from netwatcher.extensions import socketio
-socketio.on_namespace(NotificationsNamespace('/notifications'))
+# from netwatcher.extensions import socketio
+# socketio.on_namespace(NotificationsNamespace('/notifications'))
