@@ -19,9 +19,22 @@ def ip_addr():
         "data": get_ip_addr()
     })
 
-@api.route("/scan-ip/<module_name>")
-def scan_ip_api(module_name):
+@api.route("/scan-ip", methods=["POST"])
+def scan_ip_api():
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return jsonify({
+            "status": 0,
+            "data": "Invalid payload"
+        })
+    result = scan_ip(payload)
+    if result is None:
+        return jsonify({
+            "status": 0,
+            "data": "Scan failed"
+        })
+        
     return jsonify({
         "status": 1,
-        "data": scan_ip(module_name)
+        "data": result
     })
