@@ -2,7 +2,7 @@ from netwacher.models.client import Info
 
 info = Info()
 
-def get_active_interface():
+def get_active_interface_ctr():
     return info.get_active_interface()
 
 def get_ip_addr():
