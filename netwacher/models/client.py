@@ -39,18 +39,22 @@ class Info:
     def scan_ip(module_name = "scapy"):
         try:
             module = importlib.import_module(f"netwacher.thirdparty.{module_name}")
-            if module_name == "scapy":
-                func = "scapy_arp_scan"
-            elif module_name == "falback":
-                func = "parse_arp_table"
-            elif module_name == "icmp":
-                func = "ping_sweep"
-            elif module_name == "netiface":
-                func = "get_iface_network"
-            
-            func_ref = getattr(module, func)
-            result = func_ref()  # <-- jalankan fungsi-nya!\
-            return result
         except (ModuleNotFoundError, AttributeError) as e:
             print(f"Error: {e}")
             return None
+        
+        if module_name == "scapy":
+            func = "scapy_arp_scan"
+        elif module_name == "fallback":
+            func = "parse_arp_table"
+        elif module_name == "icmp":
+            func = "ping_sweep"
+        elif module_name == "netifaces":
+            func = "scan_local_network"
+        else:
+            return None
+        
+        func_ref = getattr(module, func, None)
+        result = func_ref()
+        
+        return result
