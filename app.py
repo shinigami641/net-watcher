@@ -2,10 +2,20 @@ from flask import Flask
 from netwacher.exstension import db, socketio
 from netwacher.views.api import api
 from config import Config
+from netwacher.utils.api_response import error_response, APP_ERROR_CODES
 
 def create_app(config_object=Config):
     app = Flask(__name__, static_folder='netwacher/static', template_folder='netwacher/templates')
     app.config.from_object(config_object)
+    
+    @app.errorhandler(404)
+    def not_found(e):
+        return error_response("Not Found", http_status=404, app_code=APP_ERROR_CODES["NOT_FOUND"])
+
+    @app.errorhandler(500)
+    def server_error(e):
+        # jangan leak exception detail di production
+        return error_response("Internal server error", http_status=500, app_code=APP_ERROR_CODES["SERVER_ERROR"])
     
     # init exstension
     db.init_app(app)
