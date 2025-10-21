@@ -33,7 +33,7 @@ class Info:
         try:
            return get_local_ip()
         except Exception:
-            return "Ip Not Found!!"
+            return None
     
     @staticmethod    
     def scan_ip(module_name = "scapy"):
