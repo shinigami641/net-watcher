@@ -1,9 +1,14 @@
 # netwatcher/views/socket_handlers.py  (atau di __init__.py views)
 from flask_socketio import Namespace, emit
+from flask_socketio import join_room
+from flask import request
 
 class NotificationsNamespace(Namespace):
+    
     def on_connect(self):
-        print('client connected')
+        client_id = request.args.get('client_id')
+        join_room(client_id)
+        print(f'Client {client_id} joined room')
 
     def on_disconnect(self):
         print('client disconnected')
@@ -12,6 +17,6 @@ class NotificationsNamespace(Namespace):
         print('received from client:', data)
         emit('server_response', {'ok': True})
 
-# pendaftaran
-# from netwatcher.extensions import socketio
-# socketio.on_namespace(NotificationsNamespace('/notifications'))
+def send_ws_tes(event_name, data, namespace='/notifications', room=None):
+    from netwacher.exstension import socketio
+    socketio.emit(event_name, data, namespace=namespace, room=room)
