@@ -1,0 +1,34 @@
+import socket
+from scapy.all import srp, Ether, ARP, conf
+from typing import List, Dict
+
+def get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = "127.0.0.1"
+    finally:
+        s.close()
+    return ip
+
+def scapy_arp_scan(timeout=2, iface=None) -> List[Dict[str, str]]:
+    conf.verb = 0
+    try: 
+        local_ip = get_local_ip()
+    except Exception:
+        return []
+
+    parts = local_ip.split('.')
+    network = '.'.join(parts[:3]) + '.0/24'
+    ans,_ = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=network),
+                 timeout=timeout, iface=iface, inter=0.1)
+
+    results = []
+    for _, rcv in ans:
+        results.append({'ip': rcv.psrc, 'mac': rcv.hwsrc})
+    return results
+
+if __name__ == "__main__":
+    print(scapy_arp_scan())
