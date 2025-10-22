@@ -7,3 +7,4 @@ python-dotenv
 netifaces>=0.11
 Flask-Migrate>=4.0
 psutil
+flask-cors
