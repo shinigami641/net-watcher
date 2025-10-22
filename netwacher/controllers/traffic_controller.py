@@ -1,5 +1,5 @@
 from netwacher.socket_handlers import send_ws_tes
-from netwacher.thirdparty.scapy import IPSniffer
+from netwacher.thirdparty.scapy_a import IPSniffer
 from netwacher.models.client import Info
 import time
 import uuid
