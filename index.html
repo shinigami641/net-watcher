@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>NetWatcher WS Test</title>
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 30px; background: #f5f5f5; }
+    #log { background: #fff; padding: 15px; border-radius: 8px; height: 250px; overflow-y: auto; }
+    button { padding: 8px 14px; border: none; background: #007BFF; color: #fff; border-radius: 5px; cursor: pointer; }
+    button:hover { background: #0056b3; }
+    input { padding: 8px; width: 200px; }
+  </style>
+</head>
+<body>
+  <h2>NetWatcher — Socket.IO + Flask Test</h2>
+
+  <div>
+    <input type="text" id="ipInput" placeholder="Enter IP (e.g. 192.168.1.10)" />
+    <button id="sendBtn" disabled>Send</button>
+  </div>
+
+  <h3>Realtime Log:</h3>
+  <div id="log"></div>
+
+  <script>
+    const logDiv = document.getElementById('log');
+    const sendBtn = document.getElementById('sendBtn');
+    const clientId = 'client_' + Math.random().toString(36).substring(2, 10);
+    const socket_tf = io('http://127.0.0.1:4000/notifications', { query: { client_id: clientId } });
+
+    // Helper log
+    function log(msg) {
+      const line = document.createElement('div');
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logDiv.appendChild(line);
+      logDiv.scrollTop = logDiv.scrollHeight;
+    }
+
+    // --- WS Events ---
+    socket_tf.on('connect', () => {
+      log(`✅ Connected to WS as ${clientId}`);
+      socket_tf.emit('join_room', { room: clientId }); // kirim join room
+    });
+
+    socket_tf.on('joined', (data) => {
+      log(`🏠 Joined room: ${data.room}`);
+      console.log('Joined room:', data.room);
+      sendBtn.disabled = false; // enable tombol kirim setelah join
+    });
+
+    socket_tf.on("scan_status", (data) => {
+        if (data.summary) {
+            log(`📡 Packet: ${JSON.stringify(data.summary)}`);
+        } else {
+            log(`📩 Status: ${JSON.stringify(data)}`);
+        }
+    });
+
+
+    socket_tf.onAny((event, data) => {
+        console.log('📡 Any Event:', event, data);
+    });
+
+    socket_tf.on('disconnect', () => log('❌ Disconnected'));
+
+    // --- API Trigger ---
+    sendBtn.addEventListener('click', async () => {
+      const ip = document.getElementById('ipInput').value.trim();
+      if (!ip) return alert('Masukkan IP dulu!');
+      log(`📤 Sending POST to /api/traffict with ip=${ip} and client_id=${clientId}`);
+
+      try {
+        const res = await fetch('http://127.0.0.1:4000/api/traffict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip, client_id: clientId })
+        });
+        const json = await res.json();
+        log('🟢 API Response: ' + JSON.stringify(json));
+      } catch (err) {
+        log('❌ Error: ' + err.message);
+      }
+    });
+  </script>
+</body>
+</html>
