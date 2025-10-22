@@ -3,10 +3,15 @@ from netwacher.exstension import db, socketio
 from netwacher.views.api import api
 from config import Config
 from netwacher.utils.api_response import error_response, APP_ERROR_CODES
+from netwacher.socket_handlers import NotificationsNamespace
+from flask_cors import CORS
 
 def create_app(config_object=Config):
     app = Flask(__name__, static_folder='netwacher/static', template_folder='netwacher/templates')
     app.config.from_object(config_object)
+    
+    # aktifkan CORS untuk semua endpoint
+    CORS(app, resources={r"/*": {"origins": "*"}})
     
     @app.errorhandler(404)
     def not_found(e):
@@ -20,6 +25,8 @@ def create_app(config_object=Config):
     # init exstension
     db.init_app(app)
     socketio.init_app(app)
+    
+    socketio.on_namespace(NotificationsNamespace('/notifications'))
     
     # register blueprint (route/view)
     app.register_blueprint(api, url_prefix='/api')
