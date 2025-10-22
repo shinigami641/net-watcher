@@ -4,7 +4,7 @@ import platform
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import netifaces
 import logging
-from netwacher.thirdparty.scapy import get_mac
+from getmac import get_mac_address
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -56,7 +56,7 @@ def ping_sweep(workers=100):
             ip = futures[fut]
             try:
                 if fut.result():
-                    mac = get_mac(str(ip))
+                    mac = get_mac_address(ip=str(ip), network_request=True)
                     alive.append({'ip': str(ip), 'mac': str(mac)})
 
             except Exception:
