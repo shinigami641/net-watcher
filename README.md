@@ -3,8 +3,6 @@
 **NetWatcher** — small local-only Flask app for basic network analysis in lab environments.
 Follows a simple MVC-inspired structure: **Models** (persistent DB models), **Views** (Flask routes / API), **Controllers** (business logic / orchestration), and **Services** (sniffer, ARP scanner, firewall wrappers, alert engine).
 
-> Repo name suggestion: `netwatcher`
-
 ---
 
 ## 👀 Ringkasan singkat
