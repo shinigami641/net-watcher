@@ -1,3 +1,8 @@
+# --- Tambahkan ini di paling atas ---
+import eventlet
+eventlet.monkey_patch()
+# -----------------------------------
+
 from flask import Flask
 from netwacher.exstension import db, socketio
 from netwacher.views.api import api
@@ -12,7 +17,7 @@ def create_app(config_object=Config):
     
     # aktifkan CORS untuk semua endpoint
     CORS(app, resources={r"/*": {"origins": "*"}})
-    
+
     @app.errorhandler(404)
     def not_found(e):
         return error_response("Not Found", http_status=404, app_code=APP_ERROR_CODES["NOT_FOUND"])
