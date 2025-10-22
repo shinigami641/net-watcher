@@ -32,12 +32,26 @@ def scan_ip_api():
 
 @api.route("/traffict", methods=["POST"])
 def traffic_scan():
-    print("hi")
     payload = request.get_json(silent=True)
     if payload is None:
         return error_response("Invalid or missing JSON payload", http_status=400, app_code=APP_ERROR_CODES["INVALID_INPUT"])
     data = traffict_scan_ip(payload)
     if data is None:
         return error_response("Scan failed", http_status=500, app_code=APP_ERROR_CODES["SCAN_FAILED"])
+    
+    return success_response(data=data, message="Scan Success", http_status=200)
+        
+
+@api.route("/traffict-stop", methods=["POST"])
+def traffic_stop():
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return error_response("Invalid or missing JSON payload", http_status=400, app_code=APP_ERROR_CODES["INVALID_INPUT"])
+    data = stop_scan_job(payload)
+    if data is None:
+        return error_response("Scan failed", http_status=500, app_code=APP_ERROR_CODES["SCAN_FAILED"])
+    
+    if data is not True:
+        return error_response(data, http_status=500, app_code=APP_ERROR_CODES["SCAN_FAILED"])
         
     return success_response(data=data, message="Scan Success", http_status=200)
