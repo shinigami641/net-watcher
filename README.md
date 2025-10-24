@@ -1,228 +1,585 @@
-# NetWatcher
+# NetWatcher 🌐
 
-**NetWatcher** — small local-only Flask app for basic network analysis in lab environments.
-Follows a simple MVC-inspired structure: **Models** (persistent DB models), **Views** (Flask routes / API), **Controllers** (business logic / orchestration), and **Services** (sniffer, ARP scanner, firewall wrappers, alert engine).
+**NetWatcher** adalah aplikasi monitoring jaringan berbasis web yang memungkinkan Anda untuk memantau perangkat yang terhubung ke jaringan dan menganalisis traffic jaringan secara real-time.
 
-> Repo name suggestion: `netwatcher`
+![NetWatcher Banner](https://via.placeholder.com/1200x400/1e293b/60a5fa?text=NetWatcher+-+Network+Monitoring+Tool)
 
----
+## 📋 Daftar Isi
 
-## 👀 Ringkasan singkat
+- [Fitur Utama](#-fitur-utama)
+- [Teknologi](#-teknologi)
+- [Persyaratan Sistem](#-persyaratan-sistem)
+- [Instalasi](#-instalasi)
+- [Cara Penggunaan](#-cara-penggunaan)
+- [Struktur Project](#-struktur-project)
+- [API Documentation](#-api-documentation)
+- [Troubleshooting](#-troubleshooting)
+- [Screenshots](#-screenshots)
+- [Kontribusi](#-kontribusi)
+- [License](#-license)
 
-NetWatcher dirancang untuk digunakan lokal (lab / testing) untuk:
+## ✨ Fitur Utama
 
-* Menemukan perangkat yang **berada di jaringan yang sama dengan host** (runtime ARP discovery — *not persisted by default*).
-* Menampilkan metrik traffic (dst IP, bytes — stored in DB).
-* Menjalankan sniffer ringan (scapy) dan engine sederhana untuk deteksi anomali (ARP spoofing).
-* Wrapper opsional untuk operasi firewall (iptables) — **ONLY** for lab & with explicit confirmation.
-* Frontend minimal (static JS) untuk menampilkan hasil.
+### 1. **Network Scanning**
+- 🔍 Scan perangkat di jaringan lokal menggunakan berbagai protokol
+- 📊 Deteksi IP Address dan Active Interface
+- 🎯 Mendukung multiple scanning modules:
+  - **ICMP (Ping)** - Scan cepat menggunakan ping
+  - **ARP** - Scan menggunakan ARP protocol (memerlukan root/admin)
+  - **TCP SYN** - Port scanning dengan SYN packets
 
----
+### 2. **Traffic Monitoring**
+- 📡 Real-time packet capture dan analisis
+- 🎛️ Start/Stop monitoring on-demand
+- 📈 Visualisasi traffic dengan detail:
+  - Source & Destination IP
+  - Protocol (TCP/UDP/ICMP)
+  - Port information
+  - Packet length
+- 🔄 WebSocket untuk update real-time
+- 💾 Auto-save ke PCAP dan JSONL format (soon)
 
-## ⚠️ Penting — keamanan & legal
+### 3. **Active Scans Management**
+- 📋 Monitor semua active scans dalam satu dashboard
+- 🛑 Stop individual atau bulk stop semua scans
+- 🔄 Auto-refresh status setiap 5 detik
+- 📊 Thread status monitoring (soon)
 
-* Jangan gunakan fitur sniffing / scanning di jaringan yang bukan milik Anda tanpa izin.
-* Sniffing dan iptables operations memerlukan hak administrator/root.
-* Project ini **local-only** by design. Jika ingin expose, tambahkan autentikasi & hardening terlebih dahulu.
+## 🛠 Teknologi
 
----
+### Backend
+- **Python 3.8+**
+- **Flask** - Web framework
+- **Flask-SocketIO** - WebSocket support
+- **Scapy** - Network packet manipulation
+- **python-nmap** - Network scanning
+- **UUID** - Job ID generation
 
-## Fitur utama
+### Frontend
+- **React 18+**
+- **Vite** - Build tool
+- **TailwindCSS** - Styling
+- **Axios** - HTTP client
+- **Socket.IO Client** - WebSocket client
+- **Lucide React** - Icons
 
-* `GET /api/clients` — runtime discovery clients pada LAN (scapy ARP scan jika tersedia dan process jalan dengan root; fallback ke parsing `arp -a` / `arp -n`).
-* `GET/POST /api/traffic` — lihat / catat traffic ke destination IP (persisted ke DB).
-* Sniffer service (Scapy) — start/stop melalui API (butuh root).
-* Alerts engine — mendeteksi indikasi ARP anomalies (simple heuristic).
-* Modular: controllers terpisah dari views & services — mudah diperluas.
+## 📦 Persyaratan Sistem
 
----
+### Minimum Requirements
+- **OS**: Linux (Ubuntu 20.04+, Debian 11+) atau macOS
+- **Python**: 3.8 atau lebih tinggi
+- **Node.js**: 16.x atau lebih tinggi
+- **RAM**: 2GB minimum
+- **Disk**: 500MB free space
 
-## Struktur folder (singkat)
+### Dependencies
+```bash
+# System packages (Ubuntu/Debian)
+sudo apt-get update
+sudo apt-get install python3-pip python3-venv nodejs npm nmap libpcap-dev
 
+# macOS (menggunakan Homebrew)
+brew install python node nmap libpcap
 ```
-netwatcher/
-├── app.py
-├── config.py
-├── requirements.txt
-├── netwatcher/
-│   ├── extensions.py
-│   ├── models/
-│   │   └── traffic.py
-│   ├── controllers/
-│   │   ├── client_controller.py
-│   │   └── traffic_controller.py
-│   ├── services/
-│   │   ├── arp_scanner.py
-│   │   ├── sniffer.py
-│   │   ├── firewall.py
-│   │   └── alerts.py
-│   ├── views/
-│   │   └── api.py
-│   ├── templates/
-│   └── static/
-└── migrations/
-```
 
----
+### Permissions
+⚠️ **Beberapa fitur memerlukan privilese root/administrator:**
+- ARP scanning
+- Packet capture (traffic monitoring)
+- Raw socket operations
 
-## Instalasi & quickstart (local)
+## 🚀 Instalasi
 
-1. Clone repo:
+### 1. Clone Repository
 
 ```bash
-git clone <repo-url> netwatcher
-cd netwatcher
+git clone https://github.com/shinigami641/net-watcher.git
+cd net-watcher
 ```
 
-2. Buat virtualenv & install dependensi:
+### 2. Setup Backend
 
 ```bash
-python -m venv venv
-source venv/bin/activate   # Linux/macOS
-# venv\Scripts\activate    # Windows PowerShell
+# Buat virtual environment
+python3 -m venv venv
 
+# Aktivasi virtual environment
+# Linux/macOS:
+source venv/bin/activate
+# Windows:
+# venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-3. Inisialisasi database (SQLite default):
-
-```python
-# contoh file: scripts/init_db.py atau via Python REPL
-from app import create_app
-from netwatcher.extensions import db
-
-app = create_app()
-with app.app_context():
-    db.create_all()
+**requirements.txt:**
+```txt
+Flask>=2.2
+Flask-SQLAlchemy>=3.0
+Flask-SocketIO>=5.3
+eventlet
+scapy>=2.4.5
+python-dotenv
+netifaces>=0.11
+Flask-Migrate>=4.0
+psutil
+flask-cors
+getmac
 ```
 
-4. Jalankan aplikasi:
+### 3. Setup Frontend
 
 ```bash
-export FLASK_APP=app.py
-export FLASK_ENV=development
-flask run
-# or
+# Masuk ke direktori frontend
+cd web
+
+# Install dependencies
+npm install
+```
+
+### 4. Konfigurasi
+
+#### Backend Configuration (`backend/config/api.py`)
+
+```python
+# API Configuration
+API_HOST = "127.0.0.1"
+API_PORT = 4000
+DEBUG = True
+
+# CORS Configuration
+CORS_ORIGINS still use *
+```
+
+#### Frontend Configuration (`frontend/src/config/api.js`)
+
+```javascript
+const BASE_URL = 'http://localhost:4000/api';
+export const WS_URL = 'http://127.0.0.1:4000/notifications';
+```
+
+## 🎮 Cara Penggunaan
+
+### 1. Jalankan Backend
+
+```bash
+# Aktivasi virtual environment (jika belum)
+source venv/bin/activate
+
+# Jalankan server (MEMERLUKAN ROOT untuk beberapa fitur)
+sudo venv/bin/python app.py
+
+# Atau jalankan tanpa root (fitur terbatas)
 python app.py
 ```
 
-Buka `http://127.0.0.1:5000/`.
+Backend akan berjalan di: `http://localhost:4000`
 
----
-
-## Endpoints (API)
-
-Ringkasan endpoint utama (default prefix `/api`):
-
-* `GET /api/clients`
-  Mengembalikan daftar client di LAN (runtime discovery). Response:
-
-  ```json
-  { "clients": [{"ip":"192.168.1.10","mac":"aa:bb:cc:dd:ee:01","hostname":null}, ...] }
-  ```
-
-* `GET /api/traffic`
-  Tampilkan semua record traffic yang tersimpan.
-
-* `POST /api/traffic`
-  Tambah / akumulasi traffic:
-
-  ```json
-  { "dst": "8.8.8.8", "bytes": 1024 }
-  ```
-
-* Sniffer / Alerts (contoh; implementasi dapat berbeda):
-
-  * `POST /api/sniff/start` — start sniffer (butuh root)
-  * `POST /api/sniff/stop` — stop sniffer
-  * `GET /api/alerts` — ambil alerts
-
----
-
-## Cara kerja discovery clients (penjelasan singkat)
-
-`GET /api/clients` memanggil service `arp_scanner.discover_local_clients()` yang:
-
-1. Jika Scapy tersedia *dan* process dijalankan sebagai root — melakukan ARP active scan pada subnet host (biasanya `/24` jika netmask tidak ditentukan).
-2. Jika tidak memungkinkan, fallback ke parsing ARP cache OS (`arp -a` / `arp -n`).
-3. (Opsional) Bisa di-extend untuk menambahkan ping-sweep atau reverse-DNS lookup untuk enrichment.
-
----
-
-## Contoh penggunaan (curl)
-
-* Dapatkan client:
+### 2. Jalankan Frontend
 
 ```bash
-curl http://127.0.0.1:5000/api/clients
+# Buka terminal baru
+cd web
+
+# Jalankan development server
+npm run dev
 ```
 
-* Simulasikan traffic:
+Frontend akan berjalan di: `http://localhost:5173`
 
+### 3. Akses Aplikasi
+
+Buka browser dan akses: **http://localhost:5173**
+
+## 📖 Cara Menggunakan Fitur
+
+### A. Network Scanning
+
+1. **Pilih Menu "Scan"** di sidebar
+2. **Pilih Interface** jaringan yang aktif
+3. **Pilih Scanning Module**: [sekarang statis menggunakan ICMP]
+   - **ICMP (Ping)**: Scan cepat, tidak perlu root
+   - **ARP**: Lebih akurat, memerlukan root
+   - **TCP SYN**: Port scanning, memerlukan root
+4. **Klik "Start Scan"**
+5. Tunggu hasil scan muncul dalam tabel
+
+**Tips:**
+- Gunakan ICMP untuk scan cepat
+- Gunakan ARP untuk hasil lebih akurat
+- ARP scan hanya mendeteksi perangkat di subnet yang sama
+
+### B. Traffic Monitoring
+
+1. **Pilih Menu "Traffic Scan"** di sidebar
+2. **Klik "View Traffic"** pada IP yang ingin dimonitor
+3. **Modal akan muncul** dengan button Start/Stop
+4. **Klik "Start Monitoring"** untuk mulai capture
+5. **Data packet akan muncul real-time** di tabel
+6. **Klik "Stop Monitoring"** untuk menghentikan
+7. **Klik "Clear Data"** untuk membersihkan data (hanya saat monitoring stopped)
+
+**Fitur Traffic Modal:**
+- ✅ Real-time packet capture
+- ✅ Auto-scroll dengan data terbaru di atas
+- ✅ Tampilan detail: Source, Destination, Protocol, Port, Length
+- ✅ Export otomatis ke PCAP dan JSONL
+- ✅ Raw data view untuk debugging
+
+### C. Active Scans Management
+
+1. **Klik "Active Scans Status"** di halaman Traffic Scan
+2. **Modal menampilkan** semua active scans
+3. **Fitur yang tersedia**:
+   - **Refresh**: Update status manual
+   - **Stop**: Stop individual scan
+   - **Stop All**: Stop semua scans sekaligus
+4. **Auto-refresh** setiap 5 detik
+
+## 📁 Struktur Project
+
+```
+netwatcher/
+├── netwacher/
+│   ├── app.py                      
+│   ├── config.py                      
+│   ├── requirements.txt            
+│   ├── socket_handlers.py            
+│   ├── exstension.py            
+│   ├── config/
+│   │   └── api.py                  
+│   ├── controllers/
+│   │   └── client_controller.py           
+│   │   └── traffic_controller.py           
+│   ├── views/
+│   │   └── api.py     
+│   ├── models/
+│   │   └── client.py               
+│   ├── services/
+│   │   └── alerts.py               
+│   ├── thirdparty/
+│   │   ├── scapy_a.py #scan traffict
+│   │   ├── scapy.py  #scapy file solo running
+│   │   ├── fallback.py 
+│   │   ├── icmp.py              
+│   │   ├── netifaces.py 
+│   └── utils/
+│       └── api_response.py      
+│
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── TrafficModal.jsx    # Traffic monitoring modal
+│   │   │   ├── TrafficStatusModal.jsx  # Active scans modal
+│   │   │   └── ui/                 # UI components
+│   │   ├── pages/
+│   │   │   ├── ScanPage.jsx        # Network scan page
+│   │   │   └── TrafficScanPage.jsx # Traffic scan page
+│   │   ├── config/
+│   │   │   └── api.js              # API configuration
+│   │   └── App.jsx                 # Main app component
+│   ├── package.json
+│   └── vite.config.js
+│
+└── README.md
+```
+
+## 🔌 API Documentation
+
+### Base URL
+```
+http://localhost:4000/api
+```
+
+### Endpoints
+
+#### 1. Get Active Network Interfaces
+```http
+GET /active-interface
+```
+
+**Response:**
+```json
+{
+    "data": "utun6",
+    "message": "Interface Found",
+    "status": 1,
+    "timestamp": "2025-10-24T14:23:55.862332Z"
+}
+```
+
+#### 2. Get Ip Addr
+```http
+GET /ip-addr
+```
+
+**Response:**
+```json
+{
+    "data": "172.16.9.1",
+    "message": "Ip Found",
+    "status": 1,
+    "timestamp": "2025-10-24T14:24:24.329280Z"
+}
+```
+
+#### 3. Scan Network
+```http
+POST /scan-ip
+Content-Type: application/json
+
+{
+    "module_name": "icmp"
+}
+```
+
+**Response:**
+```json
+{
+    "data": [
+        {
+            "ip": "192.168.43.1",
+            "mac": "12:20:78:94:8a:ee"
+        },
+        {
+            "ip": "192.168.43.122",
+            "mac": "f6:c8:9f:86:bc:d3"
+        }
+    ],
+    "message": "Scan Success",
+    "status": 1,
+    "timestamp": "2025-10-24T14:25:14.605044Z"
+}
+```
+
+#### 4. Start Traffic Monitoring
+```http
+POST /traffict
+Content-Type: application/json
+
+{
+  "ip": "192.168.1.10",
+  "client_id": "client_abc123"
+}
+```
+
+**Response:**
+```json
+{
+    "data": "Success",
+    "message": "Scan Success",
+    "status": 1,
+    "timestamp": "2025-10-22T03:14:42.956177Z"
+}
+```
+
+#### 5. Stop Traffic Monitoring
+```http
+POST /traffict-stop
+Content-Type: application/json
+
+{
+  "client_id": "client_abc123"
+}
+```
+
+#### 6. Get Active Scans Status
+```http
+GET /traffict-status
+```
+
+**Response:**
+```json
+{
+  "status": 1,
+  "data": {
+    "active_scans": [
+      {
+        "job_id": "550e8400-e29b-41d4-a716-446655440000",
+        "client_id": "client_abc123",
+        "ip": "192.168.1.10",
+        "thread_alive": true
+      }
+    ],
+    "count": 1
+  }
+}
+```
+
+#### 7. Stop All Active Scans
+```http
+POST /traffict-stop-all
+```
+
+### WebSocket Events
+
+#### Server → Client
+
+**Event: `scan_status`**
+```json
+{
+  "status": "Monitoring active",
+  "job": "550e8400-e29b-41d4-a716-446655440000",
+  "summary": {
+    "ts": "2024-01-15T10:30:00Z",
+    "src": "192.168.1.10",
+    "dst": "8.8.8.8",
+    "l4": "TCP",
+    "sport": 54321,
+    "dport": 443
+  }
+}
+```
+
+**Event: `scan_stopped`**
+```json
+{
+  "job": "550e8400-e29b-41d4-a716-446655440000",
+  "reason": "user_request"
+}
+```
+
+#### Client → Server
+
+**Event: `join_room`**
+```json
+{
+  "room": "client_abc123"
+}
+```
+
+## 🐛 Troubleshooting
+
+### Problem: Permission Denied saat Traffic Monitoring
+
+**Solusi:**
 ```bash
-curl -X POST http://127.0.0.1:5000/api/traffic \
-  -H "Content-Type: application/json" \
-  -d '{"dst":"8.8.8.8","bytes":2048}'
+# Jalankan backend dengan sudo
+sudo venv/bin/python app.py
 ```
 
-* Start sniffer (root required):
+### Problem: WebSocket tidak connect
 
+**Solusi:**
+1. Pastikan backend sudah running
+2. Check CORS configuration
+3. Verify WebSocket URL di frontend config
+4. Check firewall settings
+
+### Problem: ARP Scan tidak menemukan device
+
+**Solusi:**
+1. Pastikan menggunakan root privileges
+2. Check interface yang dipilih sudah benar
+3. Pastikan berada di subnet yang sama
+4. Coba gunakan TCP SYN scan sebagai alternatif
+
+### Problem: Thread tidak berhenti saat Stop
+
+**Solusi:**
+1. Gunakan "Stop All" di Active Scans Status
+2. Restart backend server
+3. Check backend logs untuk error messages
+
+### Problem: CORS Error
+
+**Solusi:**
+```python
+# Tambahkan origin frontend ke backend config
+CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://your-frontend-url"
+]
+
+# sekarang masih di set *
+```
+
+## 📸 Screenshots
+
+### Dashboard - Network Scan
+![Dashboard Info Network](assets/Dashboard.png)
+
+### Traffic Monitoring Modal
+![Traffict Modal](assets/modal_traffict.png)
+### Active Scans Status
+![active_scan_status](assets/active_scan_status.png)
+## 🔐 Security Notes
+
+⚠️ **PENTING:**
+- Aplikasi ini memerlukan raw socket access
+- Traffic capture dapat menangkap data sensitif
+- Gunakan hanya di jaringan yang Anda miliki/berwenang
+- PCAP files dapat berisi informasi sensitif
+
+## 📝 Development
+
+### Run in Development Mode
+
+**Backend:**
 ```bash
-sudo curl -X POST http://127.0.0.1:5000/api/sniff/start
+cd net-watcher
+source venv/bin/activate
+export FLASK_ENV=development
+python app.py
 ```
 
----
-
-## Development notes & tips
-
-* Untuk scanning yang akurat gunakan Scapy: `pip install scapy` dan jalankan app sebagai root (`sudo`).
-* Untuk subnet yang lebih tepat (bukan asumsi `/24`), gunakan library `netifaces` atau `psutil` untuk dapatkan IP + netmask interface, lalu hit range yang benar.
-* Semua operasi yang mengubah sistem (iptables, hooking interfaces) harus disimpan di service layer dan memerlukan konfirmasi eksplisit.
-* Untuk real-time alerts/updates pertimbangkan SSE atau WebSocket integration (flask-sse / flask-socketio).
-
----
-
-## Testing & extention ideas
-
-* Tambahkan endpoint `POST /api/clients/persist` untuk menyimpan hasil discovery ke DB (history).
-* Integrasi dengan `nmap` untuk OS detection / port scanning (opsional, requires external tool).
-* GUI: ubah frontend menjadi React/Vue dan tambahkan real-time streaming untuk alerts.
-* Tambahkan authentication / token-based access (app saat ini local-only dan bukan untuk publik).
-
----
-
-## Dependensi utama (requirements.txt)
-
-```
-Flask>=2.2
-Flask-SQLAlchemy>=3.0
-scapy>=2.4.5
-python-dotenv
-# optional: netifaces, flask-migrate, flask-socketio
+**Frontend:**
+```bash
+cd web
+npm run dev
 ```
 
+### Build for Production
+
+**Backend:**
+```bash
+# Install production dependencies only
+pip install -r requirements.txt --no-dev
+```
+
+**Frontend:**
+```bash
+# Build static files
+npm run build
+
+# Preview production build
+npm run preview
+```
+
+## 🤝 Kontribusi
+
+Kontribusi sangat diterima! Silakan:
+
+1. Fork repository ini
+2. Buat branch fitur (`git checkout -b feature/AmazingFeature`)
+3. Commit perubahan (`git commit -m 'Add some AmazingFeature'`)
+4. Push ke branch (`git push origin feature/AmazingFeature`)
+5. Buat Pull Request
+
+## 📄 License
+
+Project ini menggunakan MIT License - lihat file [LICENSE](LICENSE) untuk detail.
+
+## 👨‍💻 Author
+
+**Your Name**
+- GitHub: [@shinigami641](https://github.com/shinigami641)
+- Email: muhammadanangr@gmail.com
+
+## 🙏 Acknowledgments
+
+- [Scapy](https://scapy.net/) - Packet manipulation library
+- [Flask](https://flask.palletsprojects.com/) - Web framework
+- [React](https://react.dev/) - UI library
+- [TailwindCSS](https://tailwindcss.com/) - CSS framework
+
+## 📊 Roadmap
+
+- [ ] Change Mac
+- [ ] ARP Poison
+
 ---
 
-## Contributing
-
-Project ini dibuat untuk eksperimen / lab. Feel free to open issues or submit PRs to:
-
-* improve ARP discovery accuracy
-* harden service wrappers (iptables)
-* add tests and CI
-
----
-
-## License
-
-Tambahkan lisensi yang kamu inginkan (MIT rekomendasi untuk project lab).
-
----
-
-Kalau mau, saya bisa langsung:
-
-1. Menambahkan file `README.md` ini ke canvas repo (file nyata), atau
-2. Generate seluruh project file + ZIP yang bisa kamu download, atau
-3. Implement `discover_local_clients()` lengkap dengan fallback + optional ping sweep, lalu commit ke template.
-
-Pilih salah satu yang kamu mau.
+**⭐ Jika project ini membantu Anda, berikan star di GitHub!**
