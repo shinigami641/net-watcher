@@ -6,8 +6,10 @@ from datetime import datetime
 from threading import Thread, Event
 from typing import List, Optional, Callable
 import sys
+import time
 
 conf.use_pcap = True
+
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -21,7 +23,6 @@ def get_local_ip():
 
 def get_mac(ip):
     conf.verb = 0
-    # conf.use_pcap = True
     ans, unans = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip), timeout=2, retry=0)
     return ans[0][1].hwsrc
 
@@ -31,14 +32,13 @@ def scapy_arp_scan(timeout=2, iface=None):
     Return List of {'ip': ..., 'mac': ...}
     """
     conf.verb = 0
-    # conf.use_pcap = True
     try: 
         local_ip = get_local_ip()
     except Exception:
         return []
     parts = local_ip.split('.')
     network = '.'.join(parts[:3]) + '.0/24'
-    ans,_=srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=network), timeout=timeout, iface=iface, inter=0.1)
+    ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=network), timeout=timeout, iface=iface, inter=0.1)
     
     results = []
     for _, rcv in ans:
@@ -72,6 +72,13 @@ class IPSniffer:
         self.bpf_enabled = bpf and bool(self.ips)
         self.on_packet = on_packet
 
+        # Stop control
+        self._running = False
+        self._stop_event = Event()
+        self._stop_sniffing = False  # Additional flag for double-check
+        self._thread = None
+        self._packet_count = 0
+
         # writers
         self._pw: Optional[PcapWriter] = None
         if self.pcap_path:
@@ -88,9 +95,6 @@ class IPSniffer:
             except Exception as e:
                 print(f"[IPSniffer] Warning: failed to open jsonl file: {e}", file=sys.stderr)
                 self._json_fd = None
-
-        self._running = False
-        self._stop_event = Event()
 
     @staticmethod
     def _build_bpf_for_ips(ips: List[str]) -> str:
@@ -127,7 +131,18 @@ class IPSniffer:
         summary["target_involved"] = (summary.get("src") in self._target_set) or (summary.get("dst") in self._target_set)
         return summary
 
+    def _should_stop_packet(self, pkt) -> bool:
+        """
+        Stop filter function for scapy sniff()
+        Returns True to stop sniffing
+        """
+        return self._stop_sniffing or self._stop_event.is_set()
+
     def _prn(self, pkt):
+        # Check stop condition first
+        if self._should_stop_packet(pkt):
+            return True  # Signal to stop
+
         try:
             summ = self._packet_summary(pkt)
         except Exception as e:
@@ -137,13 +152,15 @@ class IPSniffer:
         if not summ.get("target_involved"):
             return
 
+        self._packet_count += 1
+
         # print concise summary
         src = summ.get("src", "n/a")
         dst = summ.get("dst", "n/a")
         proto = summ.get("l4", summ.get("proto"))
         sport = summ.get("sport")
         dport = summ.get("dport")
-        line = f"{summ['ts']} {src} -> {dst} proto={proto}"
+        line = f"[{self._packet_count}] {summ['ts']} {src} -> {dst} proto={proto}"
         if sport is not None and dport is not None:
             line += f" {sport}->{dport}"
         print(line, flush=True)
@@ -163,17 +180,19 @@ class IPSniffer:
             except Exception as e:
                 print(f"[IPSniffer] Failed to append jsonl: {e}", file=sys.stderr)
         
-        # NEW: call callback (non-blocking if callback quick)
+        # Call callback (non-blocking if callback quick)
         if self.on_packet:
             try:
                 self.on_packet(summ)
             except Exception as e:
-                print(f"[IPSniffer] on_packet callback raised: {e}")
+                print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
 
     def _sniff_loop(self, timeout: Optional[int], count: int):
         """
-        Internal sniff loop. We call sniff() in short chunks so stop() can interrupt quickly.
+        Internal sniff loop with improved stop mechanism
         """
+        print(f"[IPSniffer] Starting sniff loop on {self.iface} for IPs: {self.ips}")
+        
         bpf_filter = ""
         if self.bpf_enabled:
             bpf_filter = self._build_bpf_for_ips(self.ips)
@@ -184,54 +203,73 @@ class IPSniffer:
             "iface": self.iface,
             "prn": self._prn,
             "store": False,
-            # don't set timeout here — we will chunk sniff calls
-            "count": 0  # we use chunking, so let chunk control termination
+            "stop_filter": self._should_stop_packet,  # KEY: This enables stopping
         }
+        
         if bpf_filter:
             sniff_kwargs["filter"] = bpf_filter
 
         self._running = True
+        self._stop_sniffing = False
+        start_time = time.time()
+        
         try:
-            # If user gave a global timeout, translate to end timestamp
-            end_ts = None
+            # Calculate end time if timeout is set
+            end_time = None
             if timeout is not None and timeout > 0:
-                end_ts = datetime.utcnow().timestamp() + float(timeout)
+                end_time = start_time + float(timeout)
 
-            while not self._stop_event.is_set():
-                # chunk timeout small so stop() responsive
-                chunk_timeout = 5
-                # if there's an overall end timestamp, compute remaining
-                if end_ts:
-                    remaining = end_ts - datetime.utcnow().timestamp()
+            while not self._stop_event.is_set() and not self._stop_sniffing:
+                # Check global timeout
+                if end_time and time.time() >= end_time:
+                    print("[IPSniffer] Global timeout reached")
+                    break
+
+                # Calculate remaining time for this chunk
+                chunk_timeout = 2.0  # Short chunks for responsiveness
+                if end_time:
+                    remaining = end_time - time.time()
                     if remaining <= 0:
                         break
-                    chunk_timeout = min(chunk_timeout, max(0.1, remaining))
+                    chunk_timeout = min(chunk_timeout, max(0.5, remaining))
 
+                print(f"[IPSniffer] Sniffing chunk (timeout={chunk_timeout:.1f}s)...", flush=True)
+                
                 try:
-                    # call sniff for a small chunk
+                    # Sniff with timeout for this chunk
                     sniff(timeout=chunk_timeout, **sniff_kwargs)
+                    
+                    # Check stop condition after each chunk
+                    if self._stop_event.is_set() or self._stop_sniffing:
+                        print("[IPSniffer] Stop signal detected after chunk")
+                        break
+                        
+                except KeyboardInterrupt:
+                    print("[IPSniffer] KeyboardInterrupt received")
+                    break
+                    
                 except Exception as e:
-                    # possible BPF/filter error or permission error
                     print(f"[IPSniffer] sniff() raised: {e}", file=sys.stderr)
-                    if self.bpf_enabled:
-                        # fallback to no-BPF
-                        print("[IPSniffer] Retrying without BPF filter (slower).", file=sys.stderr)
+                    if self.bpf_enabled and "filter" in str(e).lower():
+                        # BPF filter error — retry without filter
+                        print("[IPSniffer] Retrying without BPF filter", file=sys.stderr)
                         self.bpf_enabled = False
                         sniff_kwargs.pop("filter", None)
                         continue
                     else:
-                        # unrecoverable — break
+                        # Unrecoverable error
+                        print("[IPSniffer] Unrecoverable error, stopping", file=sys.stderr)
                         break
 
-                # if count > 0 we could implement a matched-packet counting mechanism
-                # current implementation relies on external stop() or timeout
-                if end_ts and datetime.utcnow().timestamp() >= end_ts:
-                    break
-
+        except Exception as e:
+            print(f"[IPSniffer] Unexpected error in sniff loop: {e}", file=sys.stderr)
+            
         finally:
             self._running = False
+            self._stop_sniffing = True
             self.close()
-            print("[IPSniffer] Sniffing stopped.", flush=True)
+            elapsed = time.time() - start_time
+            print(f"[IPSniffer] Sniffing stopped. Captured {self._packet_count} packets in {elapsed:.1f}s", flush=True)
 
     def start(self, timeout: Optional[int] = None, count: int = 0, background: bool = False) -> Optional[Thread]:
         """
@@ -240,42 +278,97 @@ class IPSniffer:
         - count: (currently unused) reserved for future matched-packet stop
         - background: if True, runs in a daemon Thread and returns the Thread object
         """
+        if self._running:
+            print("[IPSniffer] Warning: already running", file=sys.stderr)
+            return self._thread
+            
         if not self.ips:
-            print("[IPSniffer] Warning: no target IPs specified; will match all traffic (use with caution).", file=sys.stderr)
+            print("[IPSniffer] Warning: no target IPs specified; will match all traffic", file=sys.stderr)
 
         self._stop_event.clear()
+        self._stop_sniffing = False
+        self._packet_count = 0
+        
         if background:
-            t = Thread(target=self._sniff_loop, args=(timeout, count), daemon=True)
-            t.start()
-            return t
+            self._thread = Thread(target=self._sniff_loop, args=(timeout, count), daemon=False)
+            self._thread.start()
+            print(f"[IPSniffer] Started in background (thread: {self._thread.name})")
+            return self._thread
         else:
             self._sniff_loop(timeout, count)
             return None
 
     def stop(self):
-        """Signal the sniffer to stop (safe to call from another thread)."""
+        """
+        Signal the sniffer to stop (safe to call from another thread).
+        This is thread-safe and will cause sniff() to exit.
+        """
+        if not self._running:
+            print("[IPSniffer] Already stopped or not running")
+            return
+            
+        print("[IPSniffer] Stop requested - setting flags...")
+        self._stop_sniffing = True
         self._stop_event.set()
+        
+        # Give it a moment to process the stop signal
+        if self._thread and self._thread.is_alive():
+            print(f"[IPSniffer] Waiting for thread to finish (max 5s)...")
+            self._thread.join(timeout=5)
+            
+            if self._thread.is_alive():
+                print("[IPSniffer] Warning: thread still alive after timeout")
+            else:
+                print("[IPSniffer] Thread stopped successfully")
 
     def close(self):
         """Close writers and cleanup."""
+        print("[IPSniffer] Closing writers...")
         try:
             if self._pw:
                 try:
+                    self._pw.flush()
                     self._pw.close()
-                except Exception:
-                    pass
-                self._pw = None
+                    print("[IPSniffer] PCAP writer closed")
+                except Exception as e:
+                    print(f"[IPSniffer] Error closing PCAP: {e}", file=sys.stderr)
+                finally:
+                    self._pw = None
         finally:
             if self._json_fd:
                 try:
+                    self._json_fd.flush()
                     self._json_fd.close()
-                except Exception:
-                    pass
-                self._json_fd = None
+                    print("[IPSniffer] JSONL writer closed")
+                except Exception as e:
+                    print(f"[IPSniffer] Error closing JSONL: {e}", file=sys.stderr)
+                finally:
+                    self._json_fd = None
 
     @property
     def is_running(self) -> bool:
         return self._running
+    
+    @property
+    def packet_count(self) -> int:
+        return self._packet_count
 
 if __name__ == "__main__":
-    print(scapy_arp_scan())
+    # Test ARP scan
+    print("Testing ARP scan...")
+    results = scapy_arp_scan()
+    print(f"Found {len(results)} devices:")
+    for r in results:
+        print(f"  {r['ip']} - {r['mac']}")
+    
+    # Test IP sniffer (uncomment to test)
+    # print("\nTesting IP Sniffer (Ctrl+C to stop)...")
+    # sniffer = IPSniffer(iface="eth0", ips=["192.168.1.1"])
+    # thread = sniffer.start(timeout=10, background=True)
+    # 
+    # import time
+    # time.sleep(5)
+    # print("Stopping sniffer...")
+    # sniffer.stop()
+    # thread.join()
+    # print(f"Captured {sniffer.packet_count} packets")
