@@ -33,7 +33,7 @@ def traffict_scan_ip(payload: dict):
 
     ip = payload["ip"]
     client_id = payload.get("client_id")
-    duration = payload.get("duration") or 1
+    duration = payload.get("duration")
     pcap = payload.get("pcap_path")
     jsonl = payload.get("jsonl_path")
     interface = info.get_active_interface()
@@ -73,64 +73,106 @@ def traffict_scan_ip(payload: dict):
 
 def stop_scan_job(payload: dict):
     """
-    payload should contain either:
-      - "job": <job_id>
-    or
-      - "client_id": <client_id>  (if you stored scans keyed by client)
+    Stop active scan job - IMPROVED VERSION
     """
     if not payload:
-        return {"error": "missing payload"}, 400
+        return "missing payload"
 
-    job_id = payload.get("job")
     client_id = payload.get("client_id")
 
-    # prefer job_id; fallback to finding by client_id
-    if not job_id and client_id:
-        # find first job for this client_id
-        found = None
-        for jid, rec in list(ACTIVE_SCANS.items()):
-            if rec.get("client_id") == client_id:
-                found = jid
-                break
-        if found:
-            job_id = found
+    if not client_id:
+        return "missing client_id"
 
-    if not job_id:
-        return "missing job or client_id"
+    # Find ALL jobs by client_id
+    jobs_to_stop = []
+    for jid, rec in list(ACTIVE_SCANS.items()):
+        if rec.get("client_id") == client_id:
+            jobs_to_stop.append((jid, rec))
 
-    rec = ACTIVE_SCANS.get(job_id)
-    if not rec:
-        return "no active scan for job"
+    if not jobs_to_stop:
+        print(f"[STOP] No active scan found for client {client_id}")
+        return "no active scan for this client"
 
-    sniffer = rec.get("sniffer")
-    thread = rec.get("thread")
-    room = rec.get("client_id")
+    stopped_count = 0
+    
+    for job_id, rec in jobs_to_stop:
+        sniffer = rec.get("sniffer")
+        thread = rec.get("thread")
+        room = client_id
 
-    # emit stopping status
-    send_ws_tes("scan_status", {"status": "Stopping scan", "job": job_id}, room=room)
+        print(f"[STOP] ========================================")
+        print(f"[STOP] Stopping job {job_id} for client {client_id}")
+        print(f"[STOP] Thread alive: {thread.is_alive() if thread else 'No thread'}")
+        
+        # Emit stopping status
+        send_ws_tes("scan_status", {"status": "Stopping scan", "job": job_id}, room=room)
 
-    # signal stop
-    try:
-        sniffer.stop()
-    except Exception as e:
-        # log but continue attempt
-        print("Error calling stop on sniffer:", e)
+        # STEP 1: Set stop flag on sniffer
+        if sniffer:
+            try:
+                print(f"[STOP] Setting stop flag on sniffer...")
+                sniffer.stop_sniffing = True
+                
+                # Call stop method if exists
+                if hasattr(sniffer, 'stop'):
+                    sniffer.stop()
+                    print(f"[STOP] Sniffer stop() method called")
+                    
+            except Exception as e:
+                print(f"[ERROR] Error calling stop on sniffer: {e}")
 
-    # wait short time for thread to finish (non-blocking safe)
-    if thread:
-        thread.join(timeout=6)  # tunggu sampai 6 detik
-        if thread.is_alive():
-            # masih hidup — kita tetap remove from registry to avoid memory leak, but warn
-            print(f"Warning: thread for job {job_id} still alive after join timeout")
+        # STEP 2: Wait for thread to finish
+        if thread:
+            if thread.is_alive():
+                print(f"[STOP] Thread is alive, waiting for it to finish...")
+                
+                # Wait with multiple attempts
+                for attempt in range(3):
+                    thread.join(timeout=2)
+                    
+                    if not thread.is_alive():
+                        print(f"[STOP] Thread finished after {attempt + 1} attempt(s)")
+                        break
+                    else:
+                        print(f"[STOP] Thread still alive after attempt {attempt + 1}, trying again...")
+                        
+                        # Force stop flag again
+                        if sniffer:
+                            sniffer.stop_sniffing = True
+                
+                # Final check
+                if thread.is_alive():
+                    print(f"[WARNING] Thread {job_id} still alive after all attempts!")
+                    print(f"[WARNING] Thread will be left as daemon and will stop when app exits")
+                    # Set as daemon so it won't block app exit
+                    thread.daemon = True
+                else:
+                    print(f"[STOP] Thread successfully stopped")
+            else:
+                print(f"[STOP] Thread already finished")
 
-    # cleanup registry
-    try:
-        ACTIVE_SCANS.pop(job_id, None)
-    except Exception:
-        pass
+        # STEP 3: Cleanup registry
+        try:
+            del ACTIVE_SCANS[job_id]
+            stopped_count += 1
+            print(f"[STOP] Removed job {job_id} from ACTIVE_SCANS")
+        except Exception as e:
+            print(f"[ERROR] Error removing from ACTIVE_SCANS: {e}")
 
-    # emit stopped confirmation
-    send_ws_tes("scan_status", {"status": "Scan stopped", "job": job_id}, room=room)
-    send_ws_tes("scan_stopped", {"job": job_id}, room=room)
+        # STEP 4: Emit stopped confirmation
+        send_ws_tes("scan_status", {"status": "Scan stopped", "job": job_id}, room=room)
+        send_ws_tes("scan_stopped", {"job": job_id}, room=room)
+        
+        print(f"[STOP] Job {job_id} cleanup completed")
+        print(f"[STOP] ========================================")
 
+    print(f"[STOP] SUMMARY: Stopped {stopped_count}/{len(jobs_to_stop)} job(s) for client {client_id}")
+    print(f"[STOP] Remaining active scans: {len(ACTIVE_SCANS)}")
+    
+    # Print remaining scans for debugging
+    if ACTIVE_SCANS:
+        print(f"[STOP] Still active:")
+        for jid, rec in ACTIVE_SCANS.items():
+            print(f"  - Job: {jid}, Client: {rec.get('client_id')}, Thread alive: {rec.get('thread').is_alive() if rec.get('thread') else False}")
+    
     return True
