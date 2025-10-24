@@ -2,8 +2,6 @@
 
 **NetWatcher** adalah aplikasi monitoring jaringan berbasis web yang memungkinkan Anda untuk memantau perangkat yang terhubung ke jaringan dan menganalisis traffic jaringan secara real-time.
 
-![NetWatcher Banner](https://via.placeholder.com/1200x400/1e293b/60a5fa?text=NetWatcher+-+Network+Monitoring+Tool)
-
 ## 📋 Daftar Isi
 
 - [Fitur Utama](#-fitur-utama)
