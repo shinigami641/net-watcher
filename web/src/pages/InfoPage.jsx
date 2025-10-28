@@ -10,7 +10,7 @@ const InfoPage = () => {
   const [networkInfo, setNetworkInfo] = useState({
     ipAddress: "",
     interface: "",
-    gateway: "192.168.1.1",
+    gateway: "",
     activeClients: 0,
   });
   const [clients, setClients] = useState([]);
@@ -25,6 +25,9 @@ const InfoPage = () => {
       // Get IP Address
       const ipResponse = await api.get(API_ENDPOINTS.IP_ADDR);
       
+      // Get IP Gateway
+      const ipGateway = await api.get(API_ENDPOINTS.IP_GATEWAY);
+      
       // Get Interface
       const interfaceResponse = await api.get(API_ENDPOINTS.ACTIVE_INTERFACE);
       
@@ -37,6 +40,13 @@ const InfoPage = () => {
         setNetworkInfo((prev) => ({
           ...prev,
           ipAddress: ipResponse.data.data,
+        }));
+      }
+      
+      if (ipGateway.data.status === 1) {
+        setNetworkInfo((prev) => ({
+          ...prev,
+          gateway: ipGateway.data.data,
         }));
       }
 
