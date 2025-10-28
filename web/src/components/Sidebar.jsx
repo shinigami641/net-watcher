@@ -1,6 +1,6 @@
 import React from "react";
 import { Button } from "./ui/button";
-import { Wifi, Info as InfoIcon, Activity, ChevronDown } from "lucide-react";
+import { Wifi, Info as InfoIcon, Activity, ChevronDown, Syringe } from "lucide-react";
 
 const Sidebar = ({ activePage, onNavigate }) => {
   const [scanExpanded, setScanExpanded] = React.useState(true);
@@ -14,7 +14,7 @@ const Sidebar = ({ activePage, onNavigate }) => {
             <Wifi className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-white">NetMonitor</h1>
+            <h1 className="text-lg font-bold text-white">NetWatcher</h1>
             <p className="text-xs text-slate-400">Network Panel</p>
           </div>
         </div>
@@ -73,6 +73,19 @@ const Sidebar = ({ activePage, onNavigate }) => {
             </div>
           )}
         </div>
+
+        {/* Arp Spoofing Button */}
+        <button
+          onClick={() => onNavigate("arp")}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            activePage === "arp"
+              ? "bg-slate-800 text-white"
+              : "text-slate-400 hover:bg-slate-800/50 hover:text-white"
+          }`}
+        >
+          <Syringe className="w-4 h-4" />
+          Arp Spoofing
+        </button>
       </nav>
 
       {/* Footer */}
