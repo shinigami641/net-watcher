@@ -12,6 +12,9 @@ def get_active_interface_ctr():
 def get_ip_addr():
     return info.get_ip_addr()
 
+def get_ip_gateway():
+    return info.get_ip_gateway()
+
 def scan_ip(payload: dict):
     if not isinstance(payload, dict):
         return None
