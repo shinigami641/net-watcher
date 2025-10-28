@@ -18,7 +18,14 @@ def ip_addr():
     data = get_ip_addr()
     if data is None:
         return error_response("Ip not found", http_status=404, app_code=APP_ERROR_CODES["IP_NOT_FOUND"])
-    return success_response(data=data, message="Ip Found", http_status=200)
+    return success_response(data=data, message="Ip Address Found", http_status=200)
+
+@api.route("/ip-gateway")
+def ip_gateway():
+    data = get_ip_gateway()
+    if data is None:
+        return error_response("Ip Gateway not found", http_status=404, app_code=APP_ERROR_CODES["IP_GATEWAY_NOT_FOUND"])
+    return success_response(data=data, message="Ip Gateway Found", http_status=200)
 
 @api.route("/scan-ip", methods=["POST"])
 def scan_ip_api():
