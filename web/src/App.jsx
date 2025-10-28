@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import Sidebar from "./components/Sidebar";
 import InfoPage from "./pages/InfoPage";
 import TrafficScanPage from "./pages/TrafficScanPage";
+import ArpPage from "./pages/ArpPage";
 
 function App() {
   const [activePage, setActivePage] = useState("info");
@@ -12,6 +13,8 @@ function App() {
         return <InfoPage />;
       case "traffic":
         return <TrafficScanPage />;
+      case "arp":
+        return <ArpPage />;
       default:
         return <InfoPage />;
     }
