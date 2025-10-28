@@ -3,7 +3,7 @@ import psutil
 import importlib
 import logging
 from datetime import datetime
-from netwacher.thirdparty.scapy_a import get_local_ip
+from netwacher.thirdparty.scapy_a import get_local_ip, get_gateway_ip
 from pathlib import Path
 import subprocess
 import sys
@@ -34,8 +34,16 @@ class Info:
     
     @staticmethod
     def get_ip_addr():
+        print("get_ip_addr")
         try:
            return get_local_ip()
+        except Exception:
+            return None
+    
+    @staticmethod
+    def get_ip_gateway():
+        try:
+           return get_gateway_ip()
         except Exception:
             return None
     
