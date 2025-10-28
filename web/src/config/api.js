@@ -12,6 +12,7 @@ export const api = axios.create({
 export const API_ENDPOINTS = {
   ACTIVE_INTERFACE: '/active-interface',
   IP_ADDR: '/ip-addr',
+  IP_GATEWAY: '/ip-gateway',
   SCAN_IP: '/scan-ip',
   TRAFFIC: '/traffict',
   TRAFFIC_STOP: '/traffict-stop',
