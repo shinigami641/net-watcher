@@ -15,6 +15,9 @@ def get_ip_addr():
 def get_ip_gateway():
     return info.get_ip_gateway()
 
+def get_info_detail_client(ip):
+    return info.get_info_detail_client(ip)
+
 def scan_ip(payload: dict):
     if not isinstance(payload, dict):
         return None
