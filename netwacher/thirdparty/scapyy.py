@@ -13,6 +13,14 @@ def get_local_ip():
         s.close()
     return ip
 
+def get_mac(ip):
+    conf.verb = 0
+    try:
+        ans, unans = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip), timeout=2, retry=0)
+        return ans[0][1].hwsrc
+    except:
+        return "-"
+
 def scapy_arp_scan(timeout=2, iface=None) -> List[Dict[str, str]]:
     conf.verb = 0
     try: 
