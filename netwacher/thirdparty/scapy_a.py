@@ -1,5 +1,6 @@
-from scapy.all import srp, Ether, ARP, conf, sniff, IP, TCP, UDP, Raw, PcapWriter, send
+from scapy.all import srp, Ether, ARP, conf, sniff, IP, TCP, UDP, Raw, PcapWriter, send, sr1, ICMP
 from scapy.utils import PcapWriter
+from scapy.data import ETHER_TYPES, MANUFDB
 import socket
 import json
 from datetime import datetime
@@ -30,6 +31,64 @@ def get_mac(ip):
 def get_gateway_ip():
     gateway = conf.route.route("0.0.0.0")[2]
     return gateway
+
+def os_fingerprint(ip):
+    try:
+        pkt = IP(dst=ip)/ICMP()
+        ans = sr1(pkt, timeout=2, verbose=False)
+        
+        if not ans:
+            return {'ip': ip, 'status': 'down'}
+        
+        if ans:
+            icmp_layer = ans.getlayer(ICMP)
+            if icmp_layer.type == 0:
+                ttl = ans.ttl
+                
+                if ttl > 128:
+                    initial_ttl = 255
+                elif ttl > 64:
+                    initial_ttl = 128
+                else:
+                    initial_ttl = 64
+                    
+                hops = initial_ttl - ttl
+                
+                os_guest = "Unknown"
+                if initial_ttl == 64:
+                    os_guest = "Linux/Unix/Mac"
+                elif initial_ttl == 128:
+                    os_guest = "Windows"
+                elif initial_ttl == 255:
+                    os_guest = "Network Devices"
+                
+                return {
+                    'ip': ip,
+                    'ttl': ttl,
+                    'initial_ttl': initial_ttl,
+                    'hops': hops,
+                    'os': os_guest,
+                    'status': 'up'
+                }
+            elif icmp_layer.type == 3:
+                return {'ip': ip, 'status': 'uncherable'}
+            
+    except Exception as e:
+        return {'ip': ip, 'status': 'error', 'error': str(e)}
+
+def get_hostname(ip):
+    try:
+        hstnm = socket.gethostbyaddr(ip)[0]
+        return hstnm
+    except:
+        return "Unknown"
+
+def get_vendor_mac(mac):
+    try:
+        vendor = MANUFDB.get(mac, "Unknown")
+        return vendor
+    except:
+        return "Unknown"
 
 def scapy_arp_scan(timeout=2, iface=None):
     """
