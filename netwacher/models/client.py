@@ -3,7 +3,8 @@ import psutil
 import importlib
 import logging
 from datetime import datetime
-from netwacher.thirdparty.scapy_a import get_local_ip, get_gateway_ip
+from netwacher.thirdparty.scapy_a import get_local_ip, get_gateway_ip, get_vendor_mac, get_hostname, os_fingerprint
+from netwacher.thirdparty.scapyy import get_mac
 from pathlib import Path
 import subprocess
 import sys
@@ -142,4 +143,23 @@ class Info:
             return func_ref()
         except Exception as e:
             logging.debug(f"[scan_ip] direct call failed: {e}")
+            return None
+        
+    @staticmethod
+    def get_info_detail_client(ip):
+        try:
+            mac = get_mac(ip)
+            vendor = get_vendor_mac(mac)
+            hstname = get_hostname(ip)
+            os = os_fingerprint(ip)
+            
+            return {
+                "mac": mac,
+                "vendor": vendor,
+                "hostname": hstname,
+                "os": os
+            }
+            
+        except Exception as e:
+            logging.debug(f"[get_info_detail_client] failed: {e}")
             return None
