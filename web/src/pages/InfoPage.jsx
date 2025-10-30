@@ -8,10 +8,10 @@ import { api, API_ENDPOINTS } from "../config/api";
 const InfoPage = () => {
   const [loading, setLoading] = useState(false);
   const [networkInfo, setNetworkInfo] = useState({
-    ipAddress: "",
-    interface: "",
-    gateway: "",
-    activeClients: 0,
+    ipAddress: null,
+    interface: null,
+    gateway: null,
+    activeClients: null,
   });
   const [clients, setClients] = useState([]);
 

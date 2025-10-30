@@ -1,66 +1,37 @@
 // ArpSpoofing.jsx
 import React, { useState, useEffect, useRef } from "react";
-import { Network, Search, Plus, RefreshCw, Play, Square, Maximize2, X } from "lucide-react";
+import { Network, Search, Plus, RefreshCw, Play, Square, Maximize2, X, ChartArea, Earth, BrickWallFire, Moon } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { api, API_ENDPOINTS } from "../config/api";
+import InfoCard from "../components/InfoCard";
 
 const ArpSpoofing = () => {
-  const [devices, setDevices] = useState([
-    {
-      ip: "192.168.1.1",
-      hostname: "router.local",
-      deviceType: "Router",
-      status: "online",
-      mac: "00:1A:2B:3C:4D:5E",
-      vendor: "TP-Link",
-      lastSeen: "15 Jan 2025 17:30",
-    },
-    {
-      ip: "192.168.1.10",
-      hostname: "desktop-pc",
-      deviceType: "PC",
-      status: "online",
-      mac: "A1:B2:C3:D4:E5:F6",
-      vendor: "Intel",
-      lastSeen: "15 Jan 2025 17:28",
-    },
-    {
-      ip: "192.168.1.25",
-      hostname: "iphone-john",
-      deviceType: "Mobile",
-      status: "online",
-      mac: "11:22:33:44:55:66",
-      vendor: "Apple",
-      lastSeen: "15 Jan 2025 17:25",
-    },
-    {
-      ip: "192.168.1.50",
-      hostname: "unknown-device",
-      deviceType: "Unknown",
-      status: "offline",
-      mac: "FF:EE:DD:CC:BB:AA",
-      vendor: "Unknown",
-      lastSeen: "15 Jan 2025 16:10",
-    },
-  ]);
+  const [clientsDevices, setClientsDevices] = useState([]);
+  const [devicesInfo, setDevicesInfo] = useState({
+    online: null,
+    offline: null,
+    unreachable: null,
+    total: null
+  });
+  const [devices, setDevices] = useState([]);
 
   const [expandedDevice, setExpandedDevice] = useState(null);
   const [spoofingDevice, setSpoofingDevice] = useState(null);
   const [terminalLogs, setTerminalLogs] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [loading, setLoading] = useState(false);
+
   const wsRef = useRef(null);
   const terminalRef = useRef(null);
 
-  const stats = {
-    total: devices.length,
-    online: devices.filter((d) => d.status === "online").length,
-    offline: devices.filter((d) => d.status === "offline").length,
-  };
+  // use clientsDevices if available, otherwise fallback to static devices
+  const displayDevices = clientsDevices.length > 0 ? clientsDevices : devices;
 
-  const filteredDevices = devices.filter(
+  const filteredDevices = displayDevices.filter(
     (device) =>
       device.ip.includes(searchTerm) ||
-      device.hostname.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      device.mac.toLowerCase().includes(searchTerm.toLowerCase())
+      (device.hostname || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (device.mac || "").toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const toggleExpand = (ip) => {
@@ -78,14 +49,20 @@ const ArpSpoofing = () => {
   };
 
   const startArpSpoof = (device) => {
+    // close previous WS if any
+    if (wsRef.current) {
+      try { wsRef.current.close(); } catch (e) { /* ignore */ }
+      wsRef.current = null;
+    }
+
     setSpoofingDevice(device);
     setTerminalLogs([]);
 
-    // Connect to WebSocket
     const ws = new WebSocket("ws://localhost:8080/arp-spoof");
     wsRef.current = ws;
 
     ws.onopen = () => {
+      console.log("[WS OPEN] sending start", device.ip);
       ws.send(
         JSON.stringify({
           action: "start",
@@ -96,15 +73,19 @@ const ArpSpoofing = () => {
     };
 
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      setTerminalLogs((prev) => [
-        ...prev,
-        {
-          timestamp: data.timestamp || new Date().toLocaleTimeString(),
-          message: data.message,
-          type: data.type || "info",
-        },
-      ]);
+      try {
+        const data = JSON.parse(event.data);
+        setTerminalLogs((prev) => [
+          ...prev,
+          {
+            timestamp: data.timestamp || new Date().toLocaleTimeString(),
+            message: data.message,
+            type: data.type || "info",
+          },
+        ]);
+      } catch (e) {
+        console.warn("[WS MSG PARSE ERR]", e, event.data);
+      }
     };
 
     ws.onerror = (error) => {
@@ -121,23 +102,29 @@ const ArpSpoofing = () => {
 
     ws.onclose = () => {
       console.log("WebSocket connection closed");
+      setSpoofingDevice(null);
     };
   };
 
   const stopArpSpoof = () => {
     if (wsRef.current) {
-      wsRef.current.send(JSON.stringify({ action: "stop" }));
+      try {
+        wsRef.current.send(JSON.stringify({ action: "stop" }));
+      } catch (e) { /* ignore send error */ }
       wsRef.current.close();
+      wsRef.current = null;
     }
     setSpoofingDevice(null);
   };
 
   const refreshDevices = () => {
     console.log("Refreshing devices...");
+    fetchNetworkInfo();
   };
 
   const addDevice = () => {
     console.log("Adding new device...");
+    // open modal / show form
   };
 
   useEffect(() => {
@@ -146,64 +133,151 @@ const ArpSpoofing = () => {
     }
   }, [terminalLogs]);
 
+  // debug: log when devicesInfo or clientsDevices changes
   useEffect(() => {
+    console.log("%c[DEVICES_INFO]", "color: cyan", devicesInfo);
+  }, [devicesInfo]);
+
+  useEffect(() => {
+    console.log("%c[CLIENTS_DEVICES]", "color: lightblue", clientsDevices);
+  }, [clientsDevices]);
+
+  useEffect(() => {
+    fetchNetworkInfo();
+
     return () => {
       if (wsRef.current) {
-        wsRef.current.close();
+        try { wsRef.current.close(); } catch (e) {}
+        wsRef.current = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const fetchNetworkInfo = async () => {
+    setLoading(true);
+
+    try {
+      const clientsResponse = await api.post(API_ENDPOINTS.SCAN_IP, {
+        module_name: "icmp",
+      });
+
+      if (clientsResponse?.data?.status === 1) {
+        const clients = clientsResponse.data.data || [];
+
+        let onlineCount = 0;
+        let offlineCount = 0;
+        let unreachableCount = 0;
+
+        const detailedClients = await Promise.all(
+          clients.map(async (client, index) => {
+            try {
+              const detailResponse = await api.get(
+                `http://localhost:4000/api/info-detail-client/${client.ip}`
+              );
+
+              const detail = detailResponse?.data?.data || {};
+              const osInfo = detail.os || {};
+
+              let status = "unknown";
+              if (osInfo.status === "up") {
+                status = "online";
+                onlineCount++;
+              } else if (osInfo.status === "down") {
+                status = "offline";
+                offlineCount++;
+              } else if (osInfo.status === "uncherable") {
+                status = "uncherable";
+                unreachableCount++;
+              } else {
+                unreachableCount++; // treat unknown as unreachable if uncertain
+              }
+
+              return {
+                ip: osInfo.ip || client.ip,
+                mac: osInfo.mac || "-",
+                hostname: detail.hostname || "-",
+                vendor: detail.vendor || "Unknown",
+                deviceType: detail.deviceType || "Unknown",
+                os: osInfo.os || "Unknown",
+                status,
+                ttl:osInfo.ttl,
+                initial_ttl:osInfo.initial_ttl,
+                hops:osInfo.hops,
+                lastSeen: new Date().toLocaleString(),
+              };
+            } catch (err) {
+              unreachableCount++;
+              return {
+                ip: client.ip,
+                mac: client.mac || "-",
+                hostname: "-",
+                vendor: "Unknown",
+                deviceType: "Unknown",
+                os: "Unknown",
+                status: "uncherable",
+                lastSeen: new Date().toLocaleTimeString(),
+              };
+            }
+          })
+        );
+
+        setClientsDevices(detailedClients);
+        setDevices(detailedClients);
+
+        const totalCount = onlineCount + offlineCount + unreachableCount;
+        const summary = {
+          online: onlineCount,
+          offline: offlineCount,
+          unreachable: unreachableCount,
+          total: totalCount,
+        };
+
+        setDevicesInfo(summary);
+      } else {
+        alert(clientsResponse?.data?.message || "Scan failed");
+      }
+    } catch (error) {
+      alert("Failed to fetch network information");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="p-8">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center">
-            <Network className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-3xl font-bold text-white">Network Manager</h1>
-            <p className="text-slate-400">
-              Kelola dan monitor perangkat di jaringan Anda
-            </p>
-          </div>
-        </div>
-      </div>
+      {/* <div>
+        <h2>Data Devices Info</h2>
+        <pre>{JSON.stringify(clientsDevices, null, 2)}</pre>
+      </div> */}
 
+      {/* rest of your UI uses displayDevices / filteredDevices */}
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
-          <div className="flex items-center gap-3">
-            <div className="text-2xl">📊</div>
-            <div>
-              <p className="text-sm text-slate-400 mb-1">Total Perangkat</p>
-              <p className="text-3xl font-bold text-white">{stats.total}</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center">
-              <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
-            </div>
-            <div>
-              <p className="text-sm text-slate-400 mb-1">Online</p>
-              <p className="text-3xl font-bold text-white">{stats.online}</p>
-            </div>
-          </div>
-        </div>
-        <div className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-6">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center">
-              <div className="w-3 h-3 rounded-full bg-red-500"></div>
-            </div>
-            <div>
-              <p className="text-sm text-slate-400 mb-1">Offline</p>
-              <p className="text-3xl font-bold text-white">{stats.offline}</p>
-            </div>
-          </div>
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <InfoCard
+          title="Total Devices"
+          value={devicesInfo.total}
+          subtitle="Total Devices"
+          icon={ChartArea}
+        />
+        <InfoCard
+          title="Total Online"
+          value={devicesInfo.online}
+          subtitle="Device Online"
+          icon={Earth}
+        />
+        <InfoCard
+          title="Total Uncherable"
+          value={devicesInfo.unreachable}
+          subtitle="Device Unchreach"
+          icon={BrickWallFire}
+        />
+        <InfoCard
+          title="Total Offline"
+          value={devicesInfo.offline}
+          subtitle="Device Offline"
+          icon={Moon}
+        />
       </div>
 
       {/* Controls */}
@@ -234,7 +308,29 @@ const ArpSpoofing = () => {
 
       {/* Devices List */}
       <div className="space-y-4">
-        {filteredDevices.map((device) => (
+        {devices.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-24 text-gray-400 border border-dashed border-gray-700 rounded-2xl bg-[#12141d]/50">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-12 w-12 mb-4 text-gray-600"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={1.5}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <p className="text-lg font-medium">Data tidak ditemukan</p>
+            <p className="text-sm text-gray-500 mt-1">
+              Coba ubah kata pencarian atau tekan <span className="text-blue-400">Refresh</span>.
+            </p>
+          </div>
+        ):(
+        filteredDevices.map((device) => (
           <div
             key={device.ip}
             className="bg-slate-800/50 border border-slate-700/50 rounded-xl overflow-hidden hover:border-slate-600/50 transition-colors"
@@ -297,7 +393,7 @@ const ArpSpoofing = () => {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="bg-slate-900/50 border border-slate-700/30 rounded-lg p-4">
                       <div className="flex items-center gap-3">
-                        <div className="text-xl">🔧</div>
+                        <div className="text-xl">🧭</div>
                         <div>
                           <p className="text-xs text-slate-400 mb-1">
                             MAC Address
@@ -310,7 +406,7 @@ const ArpSpoofing = () => {
                     </div>
                     <div className="bg-slate-900/50 border border-slate-700/30 rounded-lg p-4">
                       <div className="flex items-center gap-3">
-                        <div className="text-xl">🏢</div>
+                        <div className="text-xl">🏭</div>
                         <div>
                           <p className="text-xs text-slate-400 mb-1">Vendor</p>
                           <p className="text-sm font-medium text-white">
@@ -321,13 +417,52 @@ const ArpSpoofing = () => {
                     </div>
                     <div className="bg-slate-900/50 border border-slate-700/30 rounded-lg p-4">
                       <div className="flex items-center gap-3">
+                        <div className="text-xl">💻</div>
+                        <div>
+                          <p className="text-xs text-slate-400 mb-1">
+                            OS
+                          </p>
+                          <p className="text-sm font-medium text-white">
+                            {device.os || "-"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-slate-900/50 border border-slate-700/30 rounded-lg p-4">
+                      <div className="flex items-center gap-3">
                         <div className="text-xl">🕐</div>
                         <div>
                           <p className="text-xs text-slate-400 mb-1">
-                            Last Seen
+                            TTL
                           </p>
                           <p className="text-sm font-medium text-white">
-                            {device.lastSeen}
+                            {device.ttl || "-"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-slate-900/50 border border-slate-700/30 rounded-lg p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="text-xl">🧮</div>
+                        <div>
+                          <p className="text-xs text-slate-400 mb-1">
+                            Initial TTL
+                          </p>
+                          <p className="text-sm font-medium text-white">
+                            {device.initial_ttl || "-"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="bg-slate-900/50 border border-slate-700/30 rounded-lg p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="text-xl">🌐</div>
+                        <div>
+                          <p className="text-xs text-slate-400 mb-1">
+                            Hops
+                          </p>
+                          <p className="text-sm font-medium text-white">
+                            {device.hops || "-"}
                           </p>
                         </div>
                       </div>
@@ -410,7 +545,8 @@ const ArpSpoofing = () => {
               </div>
             )}
           </div>
-        ))}
+        ))
+      )}
       </div>
     </div>
   );
