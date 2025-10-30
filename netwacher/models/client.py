@@ -148,13 +148,11 @@ class Info:
     @staticmethod
     def get_info_detail_client(ip):
         try:
-            mac = get_mac(ip)
-            vendor = get_vendor_mac(mac)
             hstname = get_hostname(ip)
             os = os_fingerprint(ip)
+            vendor = get_vendor_mac(os.get("mac"))
             
             return {
-                "mac": mac,
                 "vendor": vendor,
                 "hostname": hstname,
                 "os": os
