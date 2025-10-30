@@ -54,6 +54,8 @@ def os_fingerprint(ip):
                     
                 hops = initial_ttl - ttl
                 
+                mac = get_mac_address(ip=str(ip), network_request=True)
+                
                 os_guest = "Unknown"
                 if initial_ttl == 64:
                     os_guest = "Linux/Unix/Mac"
@@ -68,7 +70,8 @@ def os_fingerprint(ip):
                     'initial_ttl': initial_ttl,
                     'hops': hops,
                     'os': os_guest,
-                    'status': 'up'
+                    'status': 'up',
+                    'mac': mac
                 }
             elif icmp_layer.type == 3:
                 return {'ip': ip, 'status': 'uncherable'}
