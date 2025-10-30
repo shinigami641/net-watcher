@@ -32,6 +32,7 @@ def create_app(config_object=Config):
     socketio.init_app(app)
     
     socketio.on_namespace(NotificationsNamespace('/notifications'))
+    socketio.on_namespace(NotificationsNamespace('/arp-attack'))
     
     # register blueprint (route/view)
     app.register_blueprint(api, url_prefix='/api')
