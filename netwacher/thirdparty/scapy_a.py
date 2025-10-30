@@ -544,7 +544,6 @@ class ARPSpoofing:
                 self.on_packet(f"Telling {self.target_ip} that {self.gateway_ip} is at our MAC")
                 self.on_packet(f"Telling {self.gateway_ip} that {self.target_ip} is at our MAC")
                 self.on_packet(f"Sending ARP packets every {self.interval}s")
-                self.on_packet(f"[ARPSpoofer] Press Ctrl+C to stop and restore ARP tables")
             except Exception as e:
                 print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
         
