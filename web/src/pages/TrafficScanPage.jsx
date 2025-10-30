@@ -152,7 +152,7 @@ const TrafficScanPage = () => {
             <thead className="bg-slate-800/80 border-b border-slate-700">
               <tr>
                 <th className="text-left p-4 text-sm font-medium text-slate-300">IP Address</th>
-                <th className="text-left p-4 text-sm font-medium text-slate-300">Hostname</th>
+                <th className="text-left p-4 text-sm font-medium text-slate-300">Mac</th>
                 <th className="text-left p-4 text-sm font-medium text-slate-300">Status</th>
                 <th className="text-left p-4 text-sm font-medium text-slate-300">Last Activity</th>
                 <th className="text-right p-4 text-sm font-medium text-slate-300">Actions</th>
@@ -169,7 +169,7 @@ const TrafficScanPage = () => {
                 clients.map((client, index) => (
                   <tr key={index} className="hover:bg-slate-800/30 transition-colors">
                     <td className="p-4 text-blue-400 font-mono text-sm">{client.ip}</td>
-                    <td className="p-4 text-white text-sm">{client.hostname}</td>
+                    <td className="p-4 text-white text-sm">{client.mac}</td>
                     <td className="p-4">
                       <StatusBadge status={client.status} />
                     </td>
