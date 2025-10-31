@@ -4,11 +4,11 @@ eventlet.monkey_patch()
 # -----------------------------------
 
 from flask import Flask
-from netwacher.exstension import db, socketio
-from netwacher.views.api import api
+from netwacher.exstension import socketio
+from netwacher.views.api import register_blueprints
+from netwacher.views.socket.api import init_socket
 from config import Config
 from netwacher.utils.api_response import error_response, APP_ERROR_CODES
-from netwacher.socket_handlers import NotificationsNamespace
 from flask_cors import CORS
 
 def create_app(config_object=Config):
@@ -27,15 +27,9 @@ def create_app(config_object=Config):
         # jangan leak exception detail di production
         return error_response("Internal server error", http_status=500, app_code=APP_ERROR_CODES["SERVER_ERROR"])
     
-    # init exstension
-    db.init_app(app)
-    socketio.init_app(app)
-    
-    socketio.on_namespace(NotificationsNamespace('/notifications'))
-    socketio.on_namespace(NotificationsNamespace('/arp-attack'))
-    
     # register blueprint (route/view)
-    app.register_blueprint(api, url_prefix='/api')
+    register_blueprints(app)
+    init_socket(app)
     
     return app
     
