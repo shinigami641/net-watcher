@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { X, Activity, RefreshCw, Trash2, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
-import { api, API_ENDPOINTS } from "../config/api";
+import { api, API_ENDPOINTS, BASE_URL } from "../config/api";
 
 const TrafficStatusModal = ({ onClose }) => {
   const [activeScans, setActiveScans] = useState([]);
@@ -15,7 +15,7 @@ const TrafficStatusModal = ({ onClose }) => {
   const fetchStatus = async () => {
     setRefreshing(true);
     try {
-      const response = await api.get(API_ENDPOINTS.TRAFFIC_STATUS);
+      const response = await api.get(BASE_URL+"/traffict/status");
       
       if (response.data.status === 1) {
         setActiveScans(response.data.data.active_scans || []);
@@ -40,7 +40,7 @@ const TrafficStatusModal = ({ onClose }) => {
     setLoading(true);
     try {
         // Ubah ke POST
-        const response = await api.post(API_ENDPOINTS.TRAFFIC_STOP_ALL);
+        const response = await api.post(BASE_URL+"/traffict/stop-all");
         
         if (response.data.status === 1) {
         const { stopped, failed } = response.data.data;

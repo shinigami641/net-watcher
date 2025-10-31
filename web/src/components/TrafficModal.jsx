@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { X, Activity, Play, Square } from "lucide-react";
 import { Button } from "./ui/button";
-import { api, API_ENDPOINTS, WS_URL } from "../config/api";
+import { api, API_ENDPOINTS, WS_URL, BASE_URL } from "../config/api";
 import { io } from "socket.io-client";
 
 const TrafficModal = ({ clientIp, onClose }) => {
@@ -101,7 +101,7 @@ const TrafficModal = ({ clientIp, onClose }) => {
     try {
       setStatus("Sending API request to start monitoring...");
       
-      const response = await api.post(API_ENDPOINTS.TRAFFIC, {
+      const response = await api.post(BASE_URL+"/traffict/list", {
         ip: clientIp,
         client_id: cId,
       });
@@ -149,7 +149,7 @@ const TrafficModal = ({ clientIp, onClose }) => {
     try {
       console.log("📤 Sending stop request with client_id:", clientId);
       
-      const response = await api.post(API_ENDPOINTS.TRAFFIC_STOP, {
+      const response = await api.post(BASE_URL+"/traffict/stop", {
         client_id: clientId,
       });
 

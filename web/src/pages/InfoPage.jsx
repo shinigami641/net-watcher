@@ -3,7 +3,7 @@ import InfoCard from "../components/InfoCard";
 import ClientTable from "../components/ClientTable";
 import { Globe, Network, Server, Users, RefreshCw } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { api, API_ENDPOINTS } from "../config/api";
+import { api, API_ENDPOINTS, BASE_URL } from "../config/api";
 
 const InfoPage = () => {
   const [loading, setLoading] = useState(false);
@@ -23,16 +23,16 @@ const InfoPage = () => {
     setLoading(true);
     try {
       // Get IP Address
-      const ipResponse = await api.get(API_ENDPOINTS.IP_ADDR);
+      const ipResponse = await api.get(BASE_URL+"/info/ip-addr");
       
       // Get IP Gateway
-      const ipGateway = await api.get(API_ENDPOINTS.IP_GATEWAY);
+      const ipGateway = await api.get(BASE_URL+"/info/ip-gateway");
       
       // Get Interface
-      const interfaceResponse = await api.get(API_ENDPOINTS.ACTIVE_INTERFACE);
+      const interfaceResponse = await api.get(BASE_URL+"/info/active-interface");
       
       // Get Clients
-      const clientsResponse = await api.post(API_ENDPOINTS.SCAN_IP, {
+      const clientsResponse = await api.post(BASE_URL+"/traffict/scan-ip", {
         module_name: "icmp",
       });
 
