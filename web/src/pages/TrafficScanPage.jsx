@@ -4,7 +4,7 @@ import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import TrafficModal from "../components/TrafficModal";
 import TrafficStatusModal from "../components/TrafficStatusModal";
-import { api, API_ENDPOINTS } from "../config/api";
+import { api, API_ENDPOINTS, BASE_URL } from "../config/api";
 
 const TrafficScanPage = () => {
   const [clients, setClients] = useState([]);
@@ -18,7 +18,7 @@ const TrafficScanPage = () => {
 
   const fetchClients = async () => {
     try {
-      const response = await api.post(API_ENDPOINTS.SCAN_IP, {
+      const response = await api.post(BASE_URL+"/traffict/scan-ip", {
         module_name: "icmp",
       });
 
