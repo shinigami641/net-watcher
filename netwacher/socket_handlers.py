@@ -24,5 +24,16 @@ class NotificationsNamespace(Namespace):
             emit("joined", {"room": room})
 
 def send_ws_tes(event_name, data=dict, namespace='/notifications', room=None):
+    """Helper to emit Socket.IO events ensuring namespace format and optional room.
+
+    - Ensures namespace starts with '/'
+    - Emits to specific room when provided
+    """
     from netwacher.exstension import socketio
-    socketio.emit(event_name, data, namespace=namespace, room=room)
+    ns = namespace if str(namespace).startswith('/') else f'/{namespace}'
+    try:
+        socketio.emit(event_name, data, namespace=ns, room=room)
+        # minimal debug to trace emissions
+        print(f"[WS] Emit event='{event_name}' ns='{ns}' room='{room}' data_keys={list(data.keys())}")
+    except Exception as e:
+        print(f"[WS] Emit failed for event='{event_name}' ns='{ns}' room='{room}': {e}")
