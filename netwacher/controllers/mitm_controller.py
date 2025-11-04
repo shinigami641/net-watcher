@@ -38,7 +38,7 @@ def arp_attack(payload: dict) -> dict:
     
     def on_packet_callback(summary: str):
         send_ws_tes(
-            "scan_status",
+            "arp_attack_status",
             {
                 "summary": summary, 
                 "job": job_id\
@@ -169,6 +169,7 @@ def arp_stop(payload: dict):
         return "missing payload"
 
     client_id = payload.get("client_id")
+    job_id = None
     
     if client_id:
         for jid, rec in list(ACTIVE_SCANS_ARP.items()):
@@ -190,7 +191,12 @@ def arp_stop(payload: dict):
                 "message": err_msg
             }
     
-    scan_data = ACTIVE_SCANS_ARP[job_id]
+    scan_data = ACTIVE_SCANS_ARP.get(job_id)
+    if not scan_data:
+        return {
+            "success": False,
+            "message": f"no active job found for job_id={job_id}"
+        }
     spoofer = scan_data["arp_spoof"]
     client_id = scan_data.get("client_id")
     room = client_id
@@ -284,6 +290,7 @@ def arp_get_status(payload: dict) -> dict:
         return "missing payload"
 
     client_id = payload.get("client_id")
+    job_id = None
     
     if client_id:
         for jid, rec in list(ACTIVE_SCANS_ARP.items()):
@@ -305,7 +312,12 @@ def arp_get_status(payload: dict) -> dict:
                 "message": err_msg
             }
     
-    scan_data = ACTIVE_SCANS_ARP[job_id]
+    scan_data = ACTIVE_SCANS_ARP.get(job_id)
+    if not scan_data:
+        return {
+            "success": False,
+            "message": f"no active job found for job_id={job_id}"
+        }
     spoofer = scan_data["arp_spoof"]
     
     # Ambil status dari instance ARPSpoofing
