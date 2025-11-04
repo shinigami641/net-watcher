@@ -3,7 +3,9 @@ import React, { useState, useEffect, useRef } from "react";
 import { Network, Search, Plus, RefreshCw, Play, Square, Maximize2, X, ChartArea, Earth, BrickWallFire, Moon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { api, BASE_URL,WS_URL } from "../config/api";
+import { io } from "socket.io-client";
 import InfoCard from "../components/InfoCard";
+import ArpActiveModal from "../components/ArpActiveModal";
 
 const ArpSpoofing = () => {
   const [clientsDevices, setClientsDevices] = useState([]);
@@ -21,8 +23,16 @@ const ArpSpoofing = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const wsRef = useRef(null);
+  const socketRef = useRef(null);
   const terminalRef = useRef(null);
+  const [clientId, setClientId] = useState(() => {
+    const existing = localStorage.getItem("client_id");
+    if (existing) return existing;
+    const generated = `client-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+    localStorage.setItem("client_id", generated);
+    return generated;
+  });
+  const [showActiveModal, setShowActiveModal] = useState(false);
 
   // use clientsDevices if available, otherwise fallback to static devices
   const displayDevices = clientsDevices.length > 0 ? clientsDevices : devices;
@@ -48,73 +58,96 @@ const ArpSpoofing = () => {
     return icons[deviceType] || "🔌";
   };
 
-  const startArpSpoof = (device) => {
-    // close previous WS if any
-    if (wsRef.current) {
-      try { wsRef.current.close(); } catch (e) { /* ignore */ }
-      wsRef.current = null;
+  const startArpSpoof = async (device) => {
+    // disconnect previous socket
+    if (socketRef.current) {
+      try { socketRef.current.disconnect(); } catch (e) {}
+      socketRef.current = null;
     }
 
-    setSpoofingDevice(device);
     setTerminalLogs([]);
 
-    const ws = new WebSocket("ws://localhost:8080/arp-spoof");
-    wsRef.current = ws;
+    // connect to Socket.IO namespace with client_id
+    const socket = io(`${WS_URL}/arp-attack`, {
+      transports: ["websocket"],
+      query: { client_id: clientId },
+      autoConnect: true,
+    });
+    socketRef.current = socket;
 
-    ws.onopen = () => {
-      console.log("[WS OPEN] sending start", device.ip);
-      ws.send(
-        JSON.stringify({
-          action: "start",
-          targetIp: device.ip,
-          targetMac: device.mac,
-        })
-      );
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        setTerminalLogs((prev) => [
-          ...prev,
-          {
-            timestamp: data.timestamp || new Date().toLocaleTimeString(),
-            message: data.message,
-            type: data.type || "info",
-          },
-        ]);
-      } catch (e) {
-        console.warn("[WS MSG PARSE ERR]", e, event.data);
-      }
-    };
-
-    ws.onerror = (error) => {
-      console.error("WebSocket error:", error);
+    const pushLog = (type, message) => {
       setTerminalLogs((prev) => [
         ...prev,
-        {
-          timestamp: new Date().toLocaleTimeString(),
-          message: "WebSocket connection error",
-          type: "error",
-        },
+        { timestamp: new Date().toLocaleTimeString(), type, message },
       ]);
     };
 
-    ws.onclose = () => {
-      console.log("WebSocket connection closed");
+    socket.on("connect", () => {
+      pushLog("info", `WS connected as ${clientId}`);
+    });
+    socket.on("disconnect", () => {
+      pushLog("warning", "WS disconnected");
+    });
+    socket.on("arp_attack", (data) => {
+      pushLog("info", data?.status || "ARP attack init");
+    });
+    socket.on("arp_attack_status", (data) => {
+      pushLog("info", data?.summary || JSON.stringify(data));
+    });
+    socket.on("arp_attack_started", (data) => {
+      pushLog("info", data?.message || "ARP attack started");
+    });
+    socket.on("arp_attack_error", (data) => {
+      pushLog("error", data?.error || data?.message || "ARP attack error");
+    });
+    socket.on("arp_attack_stopping", (data) => {
+      pushLog("warning", data?.message || "Stopping ARP attack...");
+    });
+    socket.on("arp_attack_stopped", (data) => {
+      pushLog("info", data?.message || "ARP attack stopped");
       setSpoofingDevice(null);
-    };
+    });
+
+    try {
+      // hit API to start ARP attack
+      const response = await api.post(`${BASE_URL}/arp/start`, {
+        ip: device.ip,
+        client_id: clientId,
+      });
+      if (response?.data?.status === 1) {
+        setSpoofingDevice(device);
+        pushLog("info", `Start request accepted for ${device.ip}`);
+      } else {
+        const msg = response?.data?.message || "Failed to start ARP attack";
+        pushLog("error", msg);
+        alert(msg);
+      }
+    } catch (error) {
+      console.error("Failed to start ARP attack:", error);
+      pushLog("error", error?.message || "Failed to start ARP attack");
+      alert("Failed to start ARP attack");
+    }
   };
 
-  const stopArpSpoof = () => {
-    if (wsRef.current) {
-      try {
-        wsRef.current.send(JSON.stringify({ action: "stop" }));
-      } catch (e) { /* ignore send error */ }
-      wsRef.current.close();
-      wsRef.current = null;
+  const stopArpSpoof = async () => {
+    try {
+      const response = await api.post(`${BASE_URL}/arp/stop`, {
+        client_id: clientId,
+      });
+      if (response?.data?.status === 1) {
+        setSpoofingDevice(null);
+      } else {
+        alert(response?.data?.message || "Failed to stop ARP attack");
+      }
+    } catch (error) {
+      console.error("Failed to stop ARP attack:", error);
+      alert("Failed to stop ARP attack");
+    } finally {
+      if (socketRef.current) {
+        try { socketRef.current.disconnect(); } catch (e) {}
+        socketRef.current = null;
+      }
     }
-    setSpoofingDevice(null);
   };
 
   const refreshDevices = () => {
@@ -146,9 +179,9 @@ const ArpSpoofing = () => {
     fetchNetworkInfo();
 
     return () => {
-      if (wsRef.current) {
-        try { wsRef.current.close(); } catch (e) {}
-        wsRef.current = null;
+      if (socketRef.current) {
+        try { socketRef.current.disconnect(); } catch (e) {}
+        socketRef.current = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -172,8 +205,9 @@ const ArpSpoofing = () => {
         const detailedClients = await Promise.all(
           clients.map(async (client, index) => {
             try {
-              const detailResponse = await api.get(
-                BASE_URL+"/info/detail-client/"+client.ip
+              const detailResponse = await api.post(
+                BASE_URL+"/info/detail-client",
+                { ip: client.ip, mac: client.mac }
               );
 
               const detail = detailResponse?.data?.data || {};
@@ -194,8 +228,8 @@ const ArpSpoofing = () => {
               }
 
               return {
-                ip: osInfo.ip || client.ip,
-                mac: osInfo.mac || "-",
+                ip: client.ip,
+                mac: client.mac || "-",
                 hostname: detail.hostname || "-",
                 vendor: detail.vendor || "Unknown",
                 deviceType: detail.deviceType || "Unknown",
@@ -245,6 +279,7 @@ const ArpSpoofing = () => {
   };
 
   return (
+    <>
     <div className="p-8">
       {/* <div>
         <h2>Data Devices Info</h2>
@@ -303,6 +338,14 @@ const ArpSpoofing = () => {
         <Button onClick={addDevice}>
           <Plus className="w-4 h-4 mr-2" />
           Tambah IP
+        </Button>
+        <Button
+          onClick={() => setShowActiveModal(true)}
+          variant="outline"
+          className="bg-slate-800/50 border-slate-700/50 hover:bg-slate-700/50"
+        >
+          <Network className="w-4 h-4 mr-2" />
+          Cek Target Aktif
         </Button>
       </div>
 
@@ -467,6 +510,19 @@ const ArpSpoofing = () => {
                         </div>
                       </div>
                     </div>
+                    <div className="bg-slate-900/50 border border-slate-700/30 rounded-lg p-4">
+                      <div className="flex items-center gap-3">
+                        <div className="text-xl">🏷️</div>
+                        <div>
+                          <p className="text-xs text-slate-400 mb-1">
+                            Hostname
+                          </p>
+                          <p className="text-sm font-medium text-white">
+                            {device.hostname || "-"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   
                   <div className="flex justify-end pt-2">
@@ -549,6 +605,13 @@ const ArpSpoofing = () => {
       )}
       </div>
     </div>
+    {showActiveModal && (
+      <ArpActiveModal
+        clientId={clientId}
+        onClose={() => setShowActiveModal(false)}
+      />
+    )}
+    </>
   );
 };
 
