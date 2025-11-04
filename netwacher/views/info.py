@@ -25,9 +25,13 @@ def ip_gateway():
         return error_response("Ip Gateway not found", http_status=404, app_code=APP_ERROR_CODES["IP_GATEWAY_NOT_FOUND"])
     return success_response(data=data, message="Ip Gateway Found", http_status=200)
 
-@info_api.route("/detail-client/<ip>")
-def info_detail_client(ip):
-    data = get_info_detail_client(ip)
+@info_api.route("/detail-client", methods=["POST"])
+def info_detail_client():
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return error_response("Invalid or missing JSON payload", http_status=400, app_code=APP_ERROR_CODES["INVALID_INPUT"])
+    data = get_info_detail_client(payload)
     if data is None:
         return error_response("Info not found", http_status=404, app_code=APP_ERROR_CODES["INFO_NOT_FOUND"])
+        
     return success_response(data=data, message="Info Found", http_status=200)
