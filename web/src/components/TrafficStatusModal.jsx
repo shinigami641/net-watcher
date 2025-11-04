@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { X, Activity, RefreshCw, Trash2, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
-import { api, API_ENDPOINTS, BASE_URL } from "../config/api";
+import { api, BASE_URL } from "../config/api";
 
 const TrafficStatusModal = ({ onClose }) => {
   const [activeScans, setActiveScans] = useState([]);

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { X, Activity, Play, Square } from "lucide-react";
 import { Button } from "./ui/button";
-import { api, API_ENDPOINTS, WS_URL, BASE_URL } from "../config/api";
+import { api, WS_URL, BASE_URL } from "../config/api";
 import { io } from "socket.io-client";
 
 const TrafficModal = ({ clientIp, onClose }) => {
@@ -34,7 +34,7 @@ const TrafficModal = ({ clientIp, onClose }) => {
   const initializeWebSocket = (cId) => {
     setStatus("Connecting to WebSocket...");
 
-    const socketConnection = io(WS_URL, {
+    const socketConnection = io(WS_URL+"/notifications", {
       query: { client_id: cId },
     });
 

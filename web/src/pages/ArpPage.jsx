@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Network, Search, Plus, RefreshCw, Play, Square, Maximize2, X, ChartArea, Earth, BrickWallFire, Moon } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { api, API_ENDPOINTS, BASE_URL } from "../config/api";
+import { api, BASE_URL,WS_URL } from "../config/api";
 import InfoCard from "../components/InfoCard";
 
 const ArpSpoofing = () => {

@@ -4,7 +4,7 @@ import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import TrafficModal from "../components/TrafficModal";
 import TrafficStatusModal from "../components/TrafficStatusModal";
-import { api, API_ENDPOINTS, BASE_URL } from "../config/api";
+import { api, BASE_URL } from "../config/api";
 
 const TrafficScanPage = () => {
   const [clients, setClients] = useState([]);

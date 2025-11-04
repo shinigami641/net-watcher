@@ -3,7 +3,7 @@ import InfoCard from "../components/InfoCard";
 import ClientTable from "../components/ClientTable";
 import { Globe, Network, Server, Users, RefreshCw } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { api, API_ENDPOINTS, BASE_URL } from "../config/api";
+import { api, BASE_URL } from "../config/api";
 
 const InfoPage = () => {
   const [loading, setLoading] = useState(false);
