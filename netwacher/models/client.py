@@ -146,11 +146,13 @@ class Info:
             return None
         
     @staticmethod
-    def get_info_detail_client(ip):
+    def get_info_detail_client(ip, mac):
         try:
+            # Determine active interface to help Scapy send packets via correct NIC
+            iface = Info.get_active_interface()
             hstname = get_hostname(ip)
-            os = os_fingerprint(ip)
-            vendor = get_vendor_mac(os.get("mac"))
+            os = os_fingerprint(ip, iface=iface)
+            vendor = get_vendor_mac(mac)
             
             return {
                 "vendor": vendor,
