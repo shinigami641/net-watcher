@@ -33,7 +33,7 @@ def arp_shut():
     return success_response(data=res, message="Arp Shut Success", http_status=200)
     
 
-@arp_api.route("/stop-all")
+@arp_api.route("/stop-all", methods=["GET", "POST"])
 def arp_stop_all():
     res = stop_all_arp_attacks()
     if res is None:
@@ -43,7 +43,7 @@ def arp_stop_all():
     
     return success_response(data=res, message="Arp Stop All Success", http_status=200)
 
-@arp_api.route("/status")
+@arp_api.route("/status", methods=["POST"])
 def arp_status():
     payload = request.get_json(silent=True)
     if payload is None:
