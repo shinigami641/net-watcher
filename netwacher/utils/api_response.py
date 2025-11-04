@@ -12,6 +12,12 @@ APP_ERROR_CODES = {
     "SERVER_ERROR": 1500,
     "MODULE_NOT_ALLOWED": 2001,
     "SCAN_FAILED": 3001,
+    # ARP specific
+    "ARP_FAILED": 3101,
+    "ARP_SHUT_FAILED": 3102,
+    "ARP_STOP_ALL_FAILED": 3103,
+    "ARP_STATUS_FAILED": 3104,
+    "ARP_ALL_ACTIVE_FAILED": 3105,
 }
 
 def _now_iso() -> str:
