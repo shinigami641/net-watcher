@@ -2,6 +2,8 @@ from scapy.all import srp, Ether, ARP, conf, sniff, IP, TCP, UDP, Raw, PcapWrite
 from scapy.utils import PcapWriter
 from scapy.data import ETHER_TYPES, MANUFDB
 import socket
+import platform
+import subprocess
 import json
 from datetime import datetime
 from threading import Thread, Event
@@ -60,6 +62,7 @@ def os_fingerprint(ip, iface: Optional[str] = None):
         if arp_ans and len(arp_ans) > 0:
             arp_reachable = True
     except Exception:
+        print(f"[os_fingerprint] ARP scan failed for {ip}")
         # Ignore ARP errors; continue with ICMP/TCP methods
         pass
     def _ttl_to_guess(ttl: int):
@@ -525,6 +528,10 @@ class ARPSpoofing:
         # Threading
         self._thread = None
         self._lock = threading.Lock()
+
+        # OS-specific toggles we may modify and need to restore
+        self._proxy_arp_prev: Optional[int] = None
+        self._proxy_arp_changed: bool = False
         
         conf.verb = 0
         
@@ -567,25 +574,199 @@ class ARPSpoofing:
         send(packet, iface=self.iface, count = 5, verbose=False)
     
     def enable_ip_forwarding(self): 
-        try: 
-            with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
-                f.write("1\n")
-                self._log("[ARPSpoofing] ✓ IP forwarding enabled")
-            return True
+        """Enable IP forwarding based on OS (Linux/macOS/Windows). Requires admin/sudo.
+        - Linux: /proc or sysctl net.ipv4.ip_forward=1
+        - macOS: sysctl net.inet.ip.forwarding=1
+        - Windows: PowerShell Set-NetIPInterface -Forwarding Enabled (requires admin) or registry IPEnableRouter=1
+        """
+        os_name = platform.system()
+        try:
+            if os_name == "Linux":
+                try:
+                    with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
+                        f.write("1\n")
+                    self._log("[ARPSpoofing] ✓ IP forwarding enabled (Linux /proc)")
+                    return True
+                except Exception:
+                    # Fallback to sysctl
+                    result = subprocess.run(["sysctl", "-w", "net.ipv4.ip_forward=1"], capture_output=True, text=True)
+                    if result.returncode == 0:
+                        self._log("[ARPSpoofing] ✓ IP forwarding enabled (Linux sysctl)")
+                        return True
+                    else:
+                        raise RuntimeError(result.stderr.strip() or "sysctl failed")
+
+            elif os_name == "Darwin":  # macOS
+                result = subprocess.run(["sysctl", "-w", "net.inet.ip.forwarding=1"], capture_output=True, text=True)
+                if result.returncode == 0:
+                    self._log("[ARPSpoofing] ✓ IP forwarding enabled (macOS)")
+                    return True
+                else:
+                    raise RuntimeError(result.stderr.strip() or "sysctl failed")
+
+            elif os_name == "Windows":
+                # Try PowerShell (enable forwarding for all IPv4 interfaces)
+                ps_cmd = (
+                    "powershell",
+                    "-Command",
+                    "Get-NetIPInterface | Where-Object {$_.AddressFamily -eq 'IPv4'} | Set-NetIPInterface -Forwarding Enabled"
+                )
+                result = subprocess.run(ps_cmd, capture_output=True, text=True)
+                if result.returncode == 0:
+                    self._log("[ARPSpoofing] ✓ IP forwarding enabled (Windows PowerShell)")
+                    return True
+                # Fallback: set registry IPEnableRouter=1 (requires admin, reboot/service restart)
+                reg_cmd = (
+                    "reg",
+                    "add",
+                    "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters",
+                    "/v",
+                    "IPEnableRouter",
+                    "/t",
+                    "REG_DWORD",
+                    "/d",
+                    "1",
+                    "/f"
+                )
+                result2 = subprocess.run(reg_cmd, capture_output=True, text=True)
+                if result2.returncode == 0:
+                    self._log("[ARPSpoofing] ✓ IP forwarding registry key set (Windows). You may need to restart or enable Routing and Remote Access service.")
+                    return True
+                else:
+                    raise RuntimeError(result2.stderr.strip() or "Windows registry update failed")
+            else:
+                raise RuntimeError(f"Unsupported OS for IP forwarding: {os_name}")
+
         except Exception as e:
-            self._log(f"[ARPSpoofing] ✗ Failed to enable IP forwarding: {e}")
-            self._log("  Try manually: echo 1 > /proc/sys/net/ipv4/ip_forward")
+            self._log(f"[ARPSpoofing] ✗ Failed to enable IP forwarding on {os_name}: {e}")
+            if os_name == "Linux":
+                self._log("  Try manually: sudo sysctl -w net.ipv4.ip_forward=1")
+            elif os_name == "Darwin":
+                self._log("  Try manually (macOS): sudo sysctl -w net.inet.ip.forwarding=1")
+            elif os_name == "Windows":
+                self._log("  Try manually (Windows PowerShell as Admin): Get-NetIPInterface | Where-Object {$_.AddressFamily -eq 'IPv4'} | Set-NetIPInterface -Forwarding Enabled")
+                self._log("  Or set registry (Admin): reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters /v IPEnableRouter /t REG_DWORD /d 1 /f")
+            return False
+
+    def enable_proxy_arp(self) -> bool:
+        """Enable proxy ARP on macOS (Darwin). Store previous value to restore later.
+        Returns True on success or already enabled, False on failure or unsupported OS.
+        """
+        try:
+            if platform.system() != "Darwin":
+                return False
+            # Read current value
+            cur = subprocess.run(["sysctl", "net.link.ether.inet.proxy_arp"], capture_output=True, text=True)
+            if cur.returncode == 0 and ":" in cur.stdout:
+                try:
+                    self._proxy_arp_prev = int(cur.stdout.strip().split(":")[-1].strip())
+                except Exception:
+                    self._proxy_arp_prev = None
+            # If already enabled
+            if self._proxy_arp_prev == 1:
+                self._log("[ARPSpoofing] ✓ Proxy ARP already enabled (macOS)")
+                self._proxy_arp_changed = False
+                return True
+            # Try to enable
+            result = subprocess.run(["sysctl", "-w", "net.link.ether.inet.proxy_arp=1"], capture_output=True, text=True)
+            if result.returncode == 0:
+                self._log("[ARPSpoofing] ✓ Proxy ARP enabled (macOS)")
+                self._proxy_arp_changed = True
+                return True
+            else:
+                raise RuntimeError(result.stderr.strip() or "sysctl failed")
+        except Exception as e:
+            self._log(f"[ARPSpoofing] ✗ Failed to enable proxy ARP (macOS): {e}")
+            self._log("  Try manually (macOS): sudo sysctl -w net.link.ether.inet.proxy_arp=1")
+            return False
+
+    def disable_proxy_arp(self) -> bool:
+        """Restore proxy ARP on macOS to previous value or disable if we changed it."""
+        try:
+            if platform.system() != "Darwin":
+                return False
+            # If we didn't change it, nothing to do
+            if not self._proxy_arp_changed:
+                return True
+            target_val = 0 if self._proxy_arp_prev is None else int(self._proxy_arp_prev)
+            result = subprocess.run(["sysctl", "-w", f"net.link.ether.inet.proxy_arp={target_val}"], capture_output=True, text=True)
+            if result.returncode == 0:
+                if target_val == 1:
+                    self._log("[ARPSpoofing] ✓ Proxy ARP restored to 1 (macOS)")
+                else:
+                    self._log("[ARPSpoofing] ✓ Proxy ARP disabled (macOS)")
+                self._proxy_arp_changed = False
+                return True
+            else:
+                raise RuntimeError(result.stderr.strip() or "sysctl failed")
+        except Exception as e:
+            self._log(f"[ARPSpoofing] ✗ Failed to restore proxy ARP (macOS): {e}")
+            self._log("  Try manually (macOS): sudo sysctl -w net.link.ether.inet.proxy_arp=0")
             return False
     
     def disable_ip_forwarding(self):
+        """Disable IP forwarding based on OS."""
+        os_name = platform.system()
         try:
-            with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
-                f.write("0\n")
-                self._log("[ARPSpoofing] ✓ IP forwarding disabled")
-            return True
+            if os_name == "Linux":
+                try:
+                    with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
+                        f.write("0\n")
+                    self._log("[ARPSpoofing] ✓ IP forwarding disabled (Linux /proc)")
+                    return True
+                except Exception:
+                    result = subprocess.run(["sysctl", "-w", "net.ipv4.ip_forward=0"], capture_output=True, text=True)
+                    if result.returncode == 0:
+                        self._log("[ARPSpoofing] ✓ IP forwarding disabled (Linux sysctl)")
+                        return True
+                    else:
+                        raise RuntimeError(result.stderr.strip() or "sysctl failed")
+            elif os_name == "Darwin":
+                result = subprocess.run(["sysctl", "-w", "net.inet.ip.forwarding=0"], capture_output=True, text=True)
+                if result.returncode == 0:
+                    self._log("[ARPSpoofing] ✓ IP forwarding disabled (macOS)")
+                    return True
+                else:
+                    raise RuntimeError(result.stderr.strip() or "sysctl failed")
+            elif os_name == "Windows":
+                ps_cmd = (
+                    "powershell",
+                    "-Command",
+                    "Get-NetIPInterface | Where-Object {$_.AddressFamily -eq 'IPv4'} | Set-NetIPInterface -Forwarding Disabled"
+                )
+                result = subprocess.run(ps_cmd, capture_output=True, text=True)
+                if result.returncode == 0:
+                    self._log("[ARPSpoofing] ✓ IP forwarding disabled (Windows PowerShell)")
+                    return True
+                reg_cmd = (
+                    "reg",
+                    "add",
+                    "HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters",
+                    "/v",
+                    "IPEnableRouter",
+                    "/t",
+                    "REG_DWORD",
+                    "/d",
+                    "0",
+                    "/f"
+                )
+                result2 = subprocess.run(reg_cmd, capture_output=True, text=True)
+                if result2.returncode == 0:
+                    self._log("[ARPSpoofing] ✓ IP forwarding registry key set to 0 (Windows). You may need to restart or stop Routing and Remote Access service.")
+                    return True
+                else:
+                    raise RuntimeError(result2.stderr.strip() or "Windows registry update failed")
+            else:
+                raise RuntimeError(f"Unsupported OS for IP forwarding: {os_name}")
         except Exception as e:
-            self._log(f"[ARPSpoofing] ✗ Failed to disable IP forwarding: {e}")
-            self._log("  Try manually: echo 0 > /proc/sys/net/ipv4/ip_forward")
+            self._log(f"[ARPSpoofing] ✗ Failed to disable IP forwarding on {os_name}: {e}")
+            if os_name == "Linux":
+                self._log("  Try manually: sudo sysctl -w net.ipv4.ip_forward=0")
+            elif os_name == "Darwin":
+                self._log("  Try manually (macOS): sudo sysctl -w net.inet.ip.forwarding=0")
+            elif os_name == "Windows":
+                self._log("  Try manually (Windows PowerShell as Admin): Get-NetIPInterface | Where-Object {$_.AddressFamily -eq 'IPv4'} | Set-NetIPInterface -Forwarding Disabled")
+                self._log("  Or set registry (Admin): reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters /v IPEnableRouter /t REG_DWORD /d 0 /f")
             return False
     
     def _poison_loop(self):
@@ -661,6 +842,8 @@ class ARPSpoofing:
                 ok = self.enable_ip_forwarding()
                 if ok is False:
                     self._log("[ARPSpoofing] ⚠ Continuing without IP forwarding (may limit packet routing)")
+            # macOS: enable proxy ARP to improve MITM stability on same-LAN
+            self.enable_proxy_arp()
 
             # Set flags
             self._running = True
@@ -747,6 +930,14 @@ class ARPSpoofing:
                 self._poisoned = False
 
             self._log("[ARPSpoofing] ✓ Stopped successfully")
+
+            # Restore OS toggles
+            self.disable_proxy_arp()
+            # Best-effort: try disable IP forwarding back (optional)
+            try:
+                self.disable_ip_forwarding()
+            except Exception:
+                pass
 
             return {
                 "success": True,
